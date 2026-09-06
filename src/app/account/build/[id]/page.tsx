@@ -27,6 +27,7 @@ import {
   removeCourseAuthor,
   setCourseGroups,
   getMyGroups,
+  getCourseAnalytics,
   unwrapResult,
   getAssetSrc,
   type InstructorCourseDetail,
@@ -36,6 +37,7 @@ import {
   type LessonFields,
   type CourseDifficulty,
   type CourseVisibility,
+  type CourseAnalytics,
 } from '@/lib/authClient'
 
 // Same style constants as AdminPanel.tsx / the instructor courses list —
@@ -93,6 +95,11 @@ export default function InstructorCourseBuilderPage({ params }: { params: Promis
   const router = useRouter()
   const { user, loading: sessionLoading } = useSession()
   const [selected, setSelected] = useState<Selection>(null)
+  // Only meaningful while selected is null (see showingLessonEditor
+  // below) — picking a lesson from the sidebar always takes over the
+  // right pane regardless of this, same as it already did for the
+  // course-settings view.
+  const [rightPaneView, setRightPaneView] = useState<'settings' | 'analytics'>('settings')
 
   const canBuild = !!user && (user.role === 'instructor' || user.role === 'staff')
   const courseQuery = useQuery({
@@ -148,9 +155,22 @@ export default function InstructorCourseBuilderPage({ params }: { params: Promis
             {course.modules.length} module{course.modules.length === 1 ? '' : 's'} · {lessonCount} lesson{lessonCount === 1 ? '' : 's'} · {course.viewCount} views
           </p>
         </div>
-        <button type="button" onClick={() => setSelected(null)} className={buttonClass}>
-          Course settings
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setSelected(null); setRightPaneView('analytics') }}
+            className={buttonClass}
+          >
+            Analytics
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSelected(null); setRightPaneView('settings') }}
+            className={buttonClass}
+          >
+            Course settings
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[280px_1fr]">
@@ -177,6 +197,8 @@ export default function InstructorCourseBuilderPage({ params }: { params: Promis
               onSaved={() => setSelected(null)}
               onCancel={() => setSelected(null)}
             />
+          ) : rightPaneView === 'analytics' ? (
+            <CourseAnalyticsPanel courseId={course.id} />
           ) : (
             <div>
               <div className="grid grid-cols-3 gap-px border border-white/10 bg-white/10">
@@ -231,11 +253,91 @@ function BuilderSkeleton() {
   )
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function StatTile({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="bg-[#17181B] p-4">
       <p className="text-2xl font-bold tracking-[-0.03em] text-white">{value}</p>
       <p className="mt-1 text-xs text-[#90939A]">{label}</p>
+    </div>
+  )
+}
+
+// Aggregate view of how the course is actually doing, distinct from the
+// per-student progress every learner already sees on their own dashboard.
+// The per-lesson funnel is the useful part — an overall completion rate
+// alone can't tell an instructor *where* people give up, this can.
+function CourseAnalyticsPanel({ courseId }: { courseId: number }) {
+  const { data: analytics, error } = useQuery({
+    queryKey: ['courseAnalytics', courseId],
+    queryFn: () => unwrapResult(getCourseAnalytics(courseId)),
+  })
+
+  if (error) {
+    return <p className="text-sm text-[#F85149]">{error.message}</p>
+  }
+
+  if (!analytics) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-20" />
+        <Skeleton className="h-64" />
+      </div>
+    )
+  }
+
+  const { enrollment, lessons } = analytics
+  const pct = (n: number | null) => (n === null ? '—' : `${n}%`)
+
+  return (
+    <div>
+      <Eyebrow>Analytics</Eyebrow>
+      <h2 className="mt-2 text-xl font-semibold text-white">How this course is doing</h2>
+
+      <div className="mt-6 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-4">
+        <StatTile label="Active" value={enrollment.active} />
+        <StatTile label="Completed" value={enrollment.completed} />
+        <StatTile label="Dropped" value={enrollment.dropped} />
+        <StatTile label="Completion rate" value={pct(enrollment.completionRatePercent)} />
+      </div>
+
+      {enrollment.total === 0 ? (
+        <p className="mt-8 text-sm text-[#90939A]">No one is enrolled yet — the funnel below fills in once students start.</p>
+      ) : (
+        <div className="mt-8">
+          <Eyebrow as="h3" className="mb-3">Lesson-by-lesson completion</Eyebrow>
+          <div className="flex flex-col gap-px border border-white/10 bg-white/10">
+            {lessons.map((lesson) => (
+              <div key={lesson.id} className="bg-[#17181B] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs uppercase tracking-[0.1em] text-white/40">{lesson.moduleTitle}</span>
+                    <p className="mt-0.5 text-sm font-medium text-white">{lesson.title}</p>
+                  </div>
+                  <span className="shrink-0 text-sm text-[#90939A]">
+                    {lesson.completedCount}/{enrollment.total} completed
+                    <span className="ml-2 text-white/40">({pct(lesson.completionRatePercent)})</span>
+                  </span>
+                </div>
+                <div className="mt-3 h-1.5 bg-white/10">
+                  <div
+                    className="h-full bg-[#FF7A33]"
+                    style={{ width: `${lesson.completionRatePercent ?? 0}%` }}
+                  />
+                </div>
+                {lesson.quiz && (
+                  <p className="mt-2 text-xs text-[#90939A]">
+                    {lesson.quiz.attemptCount} quiz attempt{lesson.quiz.attemptCount === 1 ? '' : 's'}
+                    {lesson.quiz.averageScorePercent !== null && ` · avg. score ${lesson.quiz.averageScorePercent}%`}
+                  </p>
+                )}
+              </div>
+            ))}
+            {lessons.length === 0 && (
+              <p className="bg-[#17181B] p-4 text-sm text-[#90939A]">No lessons yet.</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

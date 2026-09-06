@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import AuthTextField from '@/components/auth/AuthTextField'
 import AuthSubmitButton from '@/components/auth/AuthSubmitButton'
 import AuthMessage from '@/components/auth/AuthMessage'
 import { useSession } from '@/components/SessionProvider'
 import { useToast } from '@/components/ToastProvider'
-import { changePassword, deleteMyAccount, unwrapResult } from '@/lib/authClient'
+import { changePassword, deleteMyAccount, getStreakReminderOptIn, setStreakReminderOptIn, unwrapResult } from '@/lib/authClient'
 import Eyebrow from '@/components/Eyebrow'
 import { Skeleton } from '@/components/Skeleton'
 
@@ -84,10 +84,56 @@ export default function AccountSecurityPage() {
         />
       </div>
 
+      <div className="mt-6 max-w-md border border-white/10 bg-[#17181B] p-5">
+        <StreakReminderToggle />
+      </div>
+
       <div className="mt-10 max-w-md border border-[#F85149]/30 bg-[#17181B]">
         <DangerZone onDeleted={handleAccountDeleted} />
       </div>
     </div>
+  )
+}
+
+// A single opt-in checkbox, not a collapsible section like Password/
+// Danger zone below — there's nothing to expand, just one preference.
+// Deliberately not a recurring digest: fires at most once a day, and
+// only once someone opts in here (see sendStreakReminderEmails,
+// worker/cron.js) — the explicit alternative discussed to a broader
+// re-engagement email campaign, which was rejected as too spammy.
+function StreakReminderToggle() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const { data } = useQuery({
+    queryKey: ['streakReminderOptIn'],
+    queryFn: () => unwrapResult(getStreakReminderOptIn()),
+  })
+
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => unwrapResult(setStreakReminderOptIn(enabled)),
+    onSuccess: (_, enabled) => {
+      queryClient.setQueryData(['streakReminderOptIn'], { enabled })
+      toast.success(enabled ? 'Streak reminders on.' : 'Streak reminders off.')
+    },
+    onError: (error) => toast.error(error.message),
+  })
+
+  return (
+    <label className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        checked={data?.enabled ?? false}
+        disabled={!data || mutation.isPending}
+        onChange={(e) => mutation.mutate(e.target.checked)}
+        className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF7A33] disabled:opacity-50"
+      />
+      <span>
+        <span className="block text-sm font-medium text-white">Email me if I&apos;m about to lose a streak</span>
+        <span className="mt-1 block text-xs text-white/40">
+          At most once a day, and only when you have a streak of 3+ days going and haven&apos;t studied yet that day.
+        </span>
+      </span>
+    </label>
   )
 }
 

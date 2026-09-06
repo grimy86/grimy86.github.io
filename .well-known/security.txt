@@ -1,4 +1,4 @@
-Contact: mailto:lowlevelnotes@proton.me
+Contact: mailto:lowlevelnotes@onionmail.org
 Expires: 2029-05-31T23:59:00Z
 Encryption: https://keys.openpgp.org/vks/v1/by-fingerprint/FDFD4D558CC0776D52D75312B614326F2EB1D0D9
 Canonical: https://lowlevelnotes.com/.well-known/security.txt

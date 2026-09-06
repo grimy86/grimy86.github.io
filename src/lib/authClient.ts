@@ -359,10 +359,23 @@ export type MyStatistics = {
   lessonsCompleted: number
   quizAttempts: number
   averageQuizScorePercent: number | null
+  currentStreak: number
+  streakActiveToday: boolean
 }
 
 export function getMyStatistics() {
   return authFetch<MyStatistics>('/v1/me/statistics')
+}
+
+export function getStreakReminderOptIn() {
+  return authFetch<{ enabled: boolean }>('/v1/me/streak-reminder-opt-in')
+}
+
+export function setStreakReminderOptIn(enabled: boolean) {
+  return authFetch<{ message: string }>('/v1/me/streak-reminder-opt-in', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  })
 }
 
 export type UserAchievement = {
@@ -764,6 +777,34 @@ export function getMyCourses() {
 
 export function getMyCourse(id: number) {
   return authFetch<InstructorCourseDetail>(`/v1/instructor/courses/${id}`)
+}
+
+export type CourseAnalyticsLesson = {
+  id: number
+  title: string
+  type: LessonType
+  moduleId: number
+  moduleTitle: string
+  completedCount: number
+  completionRatePercent: number | null
+  quiz: { attemptCount: number; averageScorePercent: number | null } | null
+}
+
+export type CourseAnalytics = {
+  courseId: number
+  courseTitle: string
+  enrollment: {
+    active: number
+    completed: number
+    dropped: number
+    total: number
+    completionRatePercent: number | null
+  }
+  lessons: CourseAnalyticsLesson[]
+}
+
+export function getCourseAnalytics(id: number) {
+  return authFetch<CourseAnalytics>(`/v1/instructor/courses/${id}/analytics`)
 }
 
 export function updateCourse(

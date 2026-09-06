@@ -10,7 +10,7 @@ export default function Eyebrow({
 }: {
   children: React.ReactNode
   className?: string
-  as?: 'p' | 'h2'
+  as?: 'p' | 'h2' | 'h3'
 }) {
   return (
     <Tag className={`text-xs font-medium uppercase tracking-[0.18em] text-[#FF7A33] ${className}`}>

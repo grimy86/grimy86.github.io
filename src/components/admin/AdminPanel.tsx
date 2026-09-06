@@ -32,8 +32,8 @@ import RoleRequestsPanel from '@/components/admin/RoleRequestsPanel'
 import ResourceRequestsPanel from '@/components/admin/ResourceRequestsPanel'
 import CourseRequestsPanel from '@/components/admin/CourseRequestsPanel'
 
-type Tab = 'users' | 'ips' | 'honeypot' | 'log' | 'role-requests' | 'resource-requests' | 'course-requests'
-const TAB_IDS: Tab[] = ['users', 'ips', 'honeypot', 'role-requests', 'resource-requests', 'course-requests', 'log']
+type Tab = 'users' | 'ips' | 'honeypot' | 'log' | 'requests'
+const TAB_IDS: Tab[] = ['users', 'ips', 'honeypot', 'requests', 'log']
 
 const ACTION_LABELS: Record<string, string> = {
   role_change: 'Role change',
@@ -66,9 +66,9 @@ function initialTabFromUrl(): Tab {
 
 export default function AdminPanel() {
   // Lets CourseReviewPanel's "back to list" and breadcrumb link land back
-  // on the course-requests tab (?tab=course-requests) instead of always
-  // resetting to Users, now that course review no longer has its own route
-  // to redirect back to.
+  // on the requests tab (?tab=requests) instead of always resetting to
+  // Users, now that course review no longer has its own route to
+  // redirect back to.
   const [tab, setTab] = useState<Tab>(initialTabFromUrl)
 
   // Each of these three queries is also run independently inside its own
@@ -88,14 +88,16 @@ export default function AdminPanel() {
 
   // Approvals used to live on their own /account/approvals nav item —
   // folded in here as tabs (with the same pending counts as badges) so
-  // the account sidebar has one staff entry instead of two.
+  // the account sidebar has one staff entry instead of two. The three
+  // request types themselves later folded into one "Requests" tab
+  // (2026-09-06) — three separate tabs for what's all "things awaiting
+  // review" was one tab too many; scrolling through one combined list is
+  // fine at this app's volume.
   const TABS: { id: Tab; label: string; badge?: number | null }[] = [
     { id: 'users', label: 'Users' },
     { id: 'ips', label: 'Blocked IPs' },
     { id: 'honeypot', label: 'Honeypot' },
-    { id: 'role-requests', label: 'Role requests', badge: pendingCounts?.roleRequests },
-    { id: 'resource-requests', label: 'Resource requests', badge: pendingCounts?.resourceRequests },
-    { id: 'course-requests', label: 'Course requests', badge: pendingCounts?.courseRequests },
+    { id: 'requests', label: 'Requests', badge: pendingTotal },
     { id: 'log', label: 'Activity log' },
   ]
 
@@ -136,9 +138,17 @@ export default function AdminPanel() {
         {tab === 'users' && <UsersSection />}
         {tab === 'ips' && <BlockedIpsSection />}
         {tab === 'honeypot' && <HoneypotSection />}
-        {tab === 'role-requests' && <RoleRequestsPanel />}
-        {tab === 'resource-requests' && <ResourceRequestsPanel />}
-        {tab === 'course-requests' && <CourseRequestsPanel />}
+        {tab === 'requests' && (
+          <div className="flex flex-col gap-12">
+            <RoleRequestsPanel />
+            <div className="border-t border-white/10 pt-12">
+              <ResourceRequestsPanel />
+            </div>
+            <div className="border-t border-white/10 pt-12">
+              <CourseRequestsPanel />
+            </div>
+          </div>
+        )}
         {tab === 'log' && <AuditLogSection />}
       </div>
     </div>

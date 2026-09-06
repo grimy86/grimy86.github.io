@@ -4091,3 +4091,245 @@ cover without the interruption. Matches the project's existing
 own" philosophy already documented on `postDailySecurityDigest` — this
 extends the *exception* to that rule (truly high-signal individual
 events), not the rule itself.
+
+## Per-course analytics for instructors (2026-09-06)
+
+First of three "take the platform to the next level" ideas from the same
+day's discussion, chosen to go first over the other two (re-engagement
+emails, real code execution/grading for exercises — saved in that order,
+noted in memory so the roadmap survives past this session).
+
+**Backend.** New `GET /v1/instructor/courses/:id/analytics`
+(`getCourseAnalyticsV1`, `worker/routes/instructor.js`), wired into
+`worker/index.js` right after the existing course-detail route, same
+`isCourseAuthorV1` ownership gate as `getMyCourseV1` (owning instructor,
+co-author, or staff). Returns:
+- Enrollment counts by status (`active`/`completed`/`dropped`) plus a
+  completion rate.
+- A per-lesson completion funnel (completed count + rate against total
+  enrollment, ordered by module/lesson position) — the actual point of
+  this feature: an instructor's existing view only ever showed an overall
+  enrolled/completed count, never *where* in the course people actually
+  give up.
+- For quiz lessons specifically, attempt count and average score.
+
+Every number comes from a correlated scalar subquery in the `SELECT`
+list, matching `courseStatsSelect`/`authorsJsonSelect`'s existing style
+in `worker/lib/courseAccess.js` — deliberately not a `LEFT JOIN` against
+both `lesson_progress` and `quiz_attempts` on the same lesson row, which
+would fan out into a cartesian product (N progress rows × M quiz attempts
+for one lesson) and silently inflate every count. The quiz average uses
+`score * 100.0 / total`, not `score / total * 100` — SQLite does integer
+division when both operands are integers, so without the `.0` every
+per-attempt ratio truncates to 0 before `AVG()` ever runs.
+
+**Explicitly not attempted:** per-question wrong-answer rates. Checked
+`attemptQuizV1` first — `quiz_attempts` only ever persists the final
+`score`/`total`, never which answer was picked per question, so "which
+question do people get wrong most" genuinely isn't answerable from
+today's schema. Would need a new table recording individual answer
+selections and a change to `attemptQuizV1`'s write path — flagged as a
+real follow-up, not something to sneak into this pass.
+
+**Frontend.** `src/lib/authClient.ts` gained `getCourseAnalytics()` +
+`CourseAnalytics`/`CourseAnalyticsLesson` types. The course builder
+(`src/app/account/build/[id]/page.tsx`) gained a second header toggle,
+"Analytics", sibling to the existing "Course settings" one — both just
+set a new `rightPaneView: 'settings' | 'analytics'` state that only
+matters when no lesson is open (`showingLessonEditor` still takes
+priority, unchanged). `CourseAnalyticsPanel` renders the enrollment stat
+tiles plus the lesson funnel as a list of progress bars. `Eyebrow.tsx`'s
+`as` prop gained `'h3'` (was `'p' | 'h2'`) purely so this panel's
+"Lesson-by-lesson completion" sub-heading could nest correctly under its
+own "Analytics" `h2` — a two-value union widened by one, no other
+callers affected.
+
+**Testing and deploy.** `worker/test/course-analytics.test.js`: auth gate
+(non-owner 403, owner/staff 200), enrollment breakdown against a
+hand-built mix of active/completed/dropped enrollments, the funnel +
+quiz average against a scenario where only half of enrolled students
+reach the quiz lesson (this is what actually exercises the drop-off
+math, not just "does the endpoint return 200"), and the zero-enrollment
+divide-by-zero case (nulls, not a crash or a `NaN`). All passed on the
+first run; 26/26 across the whole suite afterward. Verified `next build`
+clean (TypeScript included), then deployed the Worker
+(`wrangler deploy`, confirmed via a dry run first) and smoke-tested the
+live endpoint: `/health` still `"status":"ok"`, and an unauthenticated
+`GET` on the new route correctly 403s rather than 404ing or leaking
+data.
+
+## Re-engagement, minus the emails (2026-09-06)
+
+Second of the three "next level" ideas, but landed differently than
+pitched: the original idea was a re-engagement email digest, rejected
+outright ("I don't want to spam the users with emails for now"). Replaced
+with two narrower pieces after discussing alternatives — the only two
+channels that can actually reach someone who's already stopped opening
+the app are email and Web Push; Web Push was floated and explicitly set
+aside, leaving an in-app-only piece (reaches active users, free) and one
+narrow opt-in email (reaches lapsed users, but only ones who explicitly
+asked).
+
+**New shared logic.** `worker/lib/streak.js`'s `getCurrentStreakStatus()`
+— the *current*, still-alive streak (resets the moment a day is missed),
+distinct from `routes/profile.js`'s `evaluateAchievementsV1`, which
+tracks the *longest-ever* streak for the `streak_days` achievement (a
+lifetime milestone that only needs to unlock once, so it never resets).
+Walks the same `date(completed_at)`/`date(attempted_at)` UNION query
+backward from the most recent activity day; if that day isn't today or
+yesterday the streak already broke (0), otherwise counts consecutive
+days until the first gap. Same UTC-calendar-day simplification the
+longest-streak calculation already makes — a user near their local
+midnight could see this off by up to a day, not solved here.
+
+**In-app (free).** `GET /v1/me/statistics` (`getMyStatisticsV1`,
+`worker/routes/courses.js`) gained `currentStreak`/`streakActiveToday`.
+`/account/courses` gained a 6th stat tile ("Current streak") and an
+orange at-risk banner ("🔥 Your N-day streak ends today") shown whenever
+`currentStreak >= 1 && !streakActiveToday` — no opt-in needed, it's free
+to show and only ever seen by someone already on the page.
+
+**Opt-in email (narrow, not a digest).** New migration
+`0031_streak_reminder_opt_in.sql` (`users.streak_reminder_opt_in`,
+`users.streak_reminder_last_sent_at`). New endpoints `GET`/`PUT
+/v1/me/streak-reminder-opt-in` (`worker/routes/profile.js`) — deliberately
+their own tiny endpoint rather than folded into `GET /v1/auth/session`
+(checked on every authenticated request), since only the Security page
+ever needs this value. A checkbox on `/account/security` ("Email me if
+I'm about to lose a streak"), off by default. `sendStreakReminderEmails`
+(`worker/cron.js`) runs off the same once-daily `0 9 * * *` trigger as
+`postDailySecurityDigest`, fires for a given user at most once per
+calendar day (`streak_reminder_last_sent_at` guards a cron retry from
+double-sending), and only when opted in, `currentStreak >= 3` (stricter
+than the in-app banner's `>=1` — an email after a single day of activity
+would read as premature/naggy in a way a free in-app banner doesn't),
+and not yet active today. Only marks `last_sent_at` on an actual
+successful send, so a Resend outage gets retried tomorrow rather than
+silently skipped for good.
+
+**Testing and deploy.** `worker/test/streak.test.js` (10 tests): the
+streak math directly (zero activity, an already-broken streak, a live
+streak ending yesterday, a streak that correctly stops counting at the
+first gap rather than including everything before it), the opt-in
+endpoints round-tripping for real, `GET /v1/me/statistics` reflecting the
+same numbers, and `sendStreakReminderEmails`'s filtering (never touches
+`last_sent_at` for a non-opted-in user or one whose streak is too short/
+already active today). The email-sending itself can only be proven
+not-to-throw in this test environment, not actually verified end-to-end
+— `RESEND_API_KEY` is unset in tests, so `sendEmail()` always no-ops by
+its own established contract, same as `postDiscordEmbed`'s equivalent
+elsewhere. 36/36 across the whole suite. Migration applied to production
+via the real `wrangler d1 migrations apply --remote` (confirmed it
+detected exactly the one new file first via `migrations list`), then
+`wrangler deploy`. Live-checked the endpoints against the staff test
+account from the session-cookie testing above; that session had since
+died (the user had logged out), so the opt-in/statistics round trip
+couldn't be re-verified live in the same way the analytics endpoint was
+— covered by the test suite instead.
+
+## AdminPanel: three request tabs merged into one (2026-09-06)
+
+Resolves the "AdminPanel now has 7 tabs" question raised earlier the same
+day and deliberately left unfixed pending real usage data — the user
+came back to it directly rather than waiting: "instead of having
+separate request tabs just make one with 'requests' and show the 3
+there, I can just scroll through."
+
+`AdminPanel.tsx`'s `Tab` union lost `'role-requests' | 'resource-requests'
+| 'course-requests'`, replaced with one `'requests'`. Its badge is
+`pendingTotal` (already computed as the sum of the three counts for the
+"Pending approvals" stat tile, so no new arithmetic needed). The tab
+body now renders `RoleRequestsPanel`, `ResourceRequestsPanel`, and
+`CourseRequestsPanel` stacked in one scrollable column with a
+`border-t` divider between each — each panel already has its own
+`SectionHeading`, so no new headings were needed to keep them
+distinguishable while scrolling. `CourseReviewPanel.tsx`'s two
+`?tab=course-requests` references (the "back to list" `router.push` and
+the breadcrumb `Link`) became `?tab=requests` to match. Tab count for a
+staff member: 7 → 5 (Users, Blocked IPs, Honeypot, Requests, Activity
+log). Verified via `next build` (clean) and the full test suite
+(36/36 — this was a frontend-only change, no Worker code touched).
+
+## First resource-loading CSP, shipped Report-Only (2026-09-06)
+
+Picked back up per the user's own earlier note ("we will do this after"
+the platform roadmap) right after the AdminPanel tab merge above.
+`next.config.ts`'s own comment had flagged this as deliberately deferred
+since a security review first added baseline headers — "needs real
+browser testing before shipping (Turnstile's iframe, external fonts,
+etc. all need explicit allowances)."
+
+No browser tooling is available in this session, so rather than guess at
+an enforced policy and risk silently breaking the live site for every
+visitor, shipped it as `Content-Security-Policy-Report-Only` instead —
+layered on top of the existing enforced `Content-Security-Policy:
+frame-ancestors 'none'` (confirmed via the spec and a live `next start` +
+`curl -I` check: multiple CSP-family headers are independent, a browser
+enforces the intersection, so this doesn't touch or weaken what's already
+enforced). Report-Only can't break anything — a browser only logs a
+console warning for what it would have blocked.
+
+**What went into the policy, and how each part was actually checked
+rather than assumed:**
+- `script-src`/`style-src` need `'unsafe-inline'`. Verified empirically:
+  built the app for real (`next build && next start`) and inspected the
+  actual served HTML directly (`curl` + a small Python script counting
+  inline `<script>` tags with no `src`) rather than guessing from
+  framework docs. Confirmed Next.js's App Router genuinely emits inline,
+  nonce-less `<script>` tags carrying the RSC streaming payload
+  (`self.__next_f.push(...)`) as a core, unavoidable part of how it
+  hydrates — a strict `script-src 'self'` without `'unsafe-inline'` or a
+  matching nonce breaks the entire site's interactivity, not just this
+  app's own code. `style-src` needs the same accommodation for a
+  different reason: dynamic inline `style={{ width: ... }}` (progress
+  bars, 12 files across the app — course/lesson progress, the streak
+  banner, course analytics funnel) can't be expressed as a static
+  nonce/hash.
+  - The theoretically-correct fix is a per-request nonce threaded
+    through `src/middleware.ts` (Next's own documented pattern), which
+    would let `script-src` drop `'unsafe-inline'` entirely. Deliberately
+    not attempted: that middleware currently only matches `/admin`
+    (honeypot logging); a nonce needs it to run on every route instead —
+    new latency and behavior on every single request, on a middleware
+    convention this exact Next version's own build output already flags
+    as deprecated ("use proxy instead"). Real surface area to get wrong
+    with genuinely no way to verify it in this session. Left as a known,
+    explicit gap rather than attempted blind.
+- No external fonts — checked directly (grepped for `next/font`, a
+  Google Fonts `<link>`, and `@font-face`/`@import` across `src/`, found
+  none; the `--font-platform-mono` CSS variable is a plain system-font
+  fallback stack, nothing remote), so `font-src` stays `'self'` only —
+  narrower than the original deferral comment's own "external fonts"
+  worry, which turned out not to apply to this codebase after all.
+- `img-src` allows `api.lowlevelnotes.com` (avatars and course icons,
+  served through `getAssetSrc`/the library-assets endpoint) and `data:`
+  (inline SVG/placeholder images).
+- `connect-src`/`script-src`/`frame-src` all allow
+  `challenges.cloudflare.com` — Turnstile's script, its background
+  verification calls, and the actual challenge iframe all need it
+  (checked `TurnstileWidget.tsx` directly for the exact script URL and
+  render mechanism rather than assuming).
+- `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`,
+  `upgrade-insecure-requests` added as straightforward, low-risk
+  hardening — nothing in the app uses plugins, a `<base>` tag, or submits
+  a native form cross-origin.
+
+**Deploy note, different from every other change this session:** this is
+the Next.js frontend (Vercel), not the Worker — no `wrangler deploy` step
+exists for it. Per AGENTS.md's delivery pipeline (GitHub push → GitHub
+Actions → Vercel build/deploy), this only takes effect once committed and
+pushed through the normal git workflow, which wasn't done here (commits
+aren't made without being asked). Verified locally instead: `next build`
+clean, and a live `next start` + `curl -I` confirmed both the
+`Content-Security-Policy` and `Content-Security-Policy-Report-Only`
+headers appear correctly and independently on `/`, `/login`, and
+`/account/courses`.
+
+**Next step, not done yet:** once this is live, open the real site with
+devtools' console open and click through the main flows (login/register
+with Turnstile, browsing a course, the account dashboard) — any
+Report-Only violation logs a console warning without breaking anything.
+If nothing shows up after a reasonable soak, the policy can move from
+`Content-Security-Policy-Report-Only` to the real enforced
+`Content-Security-Policy` header (merging it with the existing
+`frame-ancestors 'none'` line rather than keeping two separate headers).

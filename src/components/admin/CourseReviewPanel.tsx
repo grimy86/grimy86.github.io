@@ -35,7 +35,7 @@ export default function CourseReviewPanel({ id }: { id: number }) {
     queryClient.invalidateQueries({ queryKey: ['staffCourses'] })
     queryClient.invalidateQueries({ queryKey: ['staffPendingCounts'] })
     toast.success(message)
-    router.push('/account/staff?tab=course-requests')
+    router.push('/account/staff?tab=requests')
   }
 
   const reviewMutation = useMutation({
@@ -79,7 +79,7 @@ export default function CourseReviewPanel({ id }: { id: number }) {
 
   return (
     <div>
-      <Link href="/account/staff?tab=course-requests" className="text-xs uppercase tracking-[0.12em] text-white/40 transition-colors hover:text-white">
+      <Link href="/account/staff?tab=requests" className="text-xs uppercase tracking-[0.12em] text-white/40 transition-colors hover:text-white">
         ← Course requests
       </Link>
 

@@ -1288,6 +1288,65 @@ main domain is scoped against — see below.
   scanner guessing a common path, and alerting on every one of those
   would page staff for background noise the daily digest/panel already
   cover.
+- Per-course analytics for instructors/staff (2026-09-06) — new `GET
+  /v1/instructor/courses/:id/analytics` (`getCourseAnalyticsV1`,
+  `worker/routes/instructor.js`), same ownership gate as `GET
+  /v1/instructor/courses/:id` (`isCourseAuthorV1`: owning instructor, any
+  co-author, or staff). First of the three "what would take the platform
+  to the next level" ideas discussed the same day (the other two —
+  re-engagement emails, real code execution/grading for exercises — are
+  intentionally deferred, in that order). Returns enrollment counts by
+  status (active/completed/dropped) plus a per-lesson completion funnel
+  and, for quiz lessons, attempt count and average score — the thing a
+  per-student progress view can't show is *where* people give up, which
+  this is for. Every count is a correlated scalar subquery per row (same
+  style as `courseStatsSelect`/`authorsJsonSelect` in
+  `worker/lib/courseAccess.js`), not a `LEFT JOIN` against
+  `lesson_progress`/`quiz_attempts` — joining both against the same
+  lesson row would fan out into a cartesian product and silently inflate
+  every count. Deliberately doesn't break a quiz down per-question:
+  `quiz_attempts` only ever stored the final score/total, never which
+  answer was chosen per question (see `attemptQuizV1`), so "which
+  question do people get wrong most" isn't answerable without a schema
+  change — noted as a real follow-up, not attempted here. Frontend: a new
+  "Analytics" toggle in the course builder header
+  (`src/app/account/build/[id]/page.tsx`) swaps the right pane to
+  `CourseAnalyticsPanel`, sibling to the existing "Course settings"
+  toggle (`rightPaneView` state, independent of `selected` which still
+  takes priority whenever a lesson is open). Covered by `worker/test/course-analytics.test.js` (auth gate, enrollment
+  breakdown, the funnel + quiz average with a hand-computed expected
+  value, and the nobody's-enrolled-yet divide-by-zero case) — all passed
+  on the first run. Worth flagging for the next person touching this
+  query anyway: it deliberately writes `score * 100.0 / total`, not
+  `score / total * 100`, since SQLite does integer division when both
+  operands are integers — the `.0` forces floating-point math before the
+  `AVG()` runs, otherwise every per-attempt ratio truncates to 0 first.
+- Re-engagement without email spam (2026-09-06) — second of the three
+  "next level" ideas from the same day, but a recurring email digest was
+  rejected outright ("I don't want to spam the users with emails"); Web
+  Push was also discussed and set aside. Landed on two pieces instead:
+  a free in-app streak-at-risk banner (`/account/courses`, shown whenever
+  `currentStreak >= 1 && !streakActiveToday`) and a single narrow opt-in
+  email trigger (not a digest — fires at most once/day, only for
+  `currentStreak >= 3`, toggled off by default on `/account/security`).
+  `worker/lib/streak.js`'s `getCurrentStreakStatus()` is the *current,
+  still-alive* streak — deliberately a new, separate calculation from
+  `routes/profile.js`'s `evaluateAchievementsV1`, which only ever tracks
+  the *longest-ever* streak for the `streak_days` achievement (a lifetime
+  milestone that never resets, so it can't answer "is today's streak
+  actually at risk"). Both share the same UTC-calendar-day simplification
+  via SQLite's `date()` on stored UTC timestamps. New migration
+  `0031_streak_reminder_opt_in.sql`
+  (`users.streak_reminder_opt_in`/`streak_reminder_last_sent_at`); the
+  opt-in flag has its own tiny `GET`/`PUT /v1/me/streak-reminder-opt-in`
+  endpoint rather than being folded into `GET /v1/auth/session` (checked
+  on every authenticated request) — only the Security page ever needs
+  it. `sendStreakReminderEmails` (`worker/cron.js`) piggybacks on the
+  same once-daily `0 9 * * *` trigger `postDailySecurityDigest` already
+  uses. Covered by `worker/test/streak.test.js` (10 tests: the streak
+  math, the opt-in round-trip, and the cron function's filtering) —
+  36/36 across the whole suite. See WORKLOG's "Re-engagement, minus the
+  emails" entry for the full design reasoning.
 - `/account`'s standalone "Overview" page/nav item was removed (2026-09-06)
   — its avatar/name/role greeting duplicated the Profile page (`/u/[id]`,
   which already shows all three plus bio and achievements) verbatim, so
@@ -1330,6 +1389,32 @@ main domain is scoped against — see below.
   links now go to `/account/staff?tab=course-requests` so returning from a
   review lands back on that tab instead of resetting to Users.
   `/account/approvals/*` no longer exists.
+  **Update (2026-09-06, same day):** those three separate tabs were
+  themselves merged into one `requests` tab — `RoleRequestsPanel`/
+  `ResourceRequestsPanel`/`CourseRequestsPanel` now render stacked in one
+  scrollable column instead of three tab switches, and the course-review
+  breadcrumb/back-link target is `?tab=requests`, not `?tab=course-requests`.
+  Staff tab count: 7 → 5.
+- First resource-loading CSP, shipped as `Content-Security-Policy-Report-Only`
+  rather than enforced (2026-09-06) — `next.config.ts`'s own comment had
+  flagged this as deferred pending real browser testing, which isn't
+  available in this environment. Verified what the policy actually needs
+  by inspecting the real built HTML (`next build && next start` + `curl`)
+  instead of assuming: Next's App Router genuinely emits inline,
+  nonce-less `<script>` tags for its RSC streaming payload, so
+  `script-src`/`style-src` (the latter for dynamic `style={{ width }}`
+  progress bars) both need `'unsafe-inline'` — the correct nonce-based
+  fix needs `src/middleware.ts`'s matcher widened from `/admin`-only to
+  every route, deliberately not attempted blind on a middleware
+  convention this Next version already flags deprecated. No external
+  fonts (checked, none found) so `font-src` stays `'self'` only,
+  narrower than originally worried. `challenges.cloudflare.com` allowed
+  in `script-src`/`connect-src`/`frame-src` for Turnstile. This lives in
+  the Next.js app (Vercel), not the Worker — no `wrangler deploy` for it;
+  takes effect only once pushed through the normal GitHub → Vercel
+  pipeline. See WORKLOG's "First resource-loading CSP" entry for the
+  full reasoning and the "browse with devtools open, then flip to
+  enforced" follow-up.
 
 ### Learning and motivation model
 

@@ -70,6 +70,19 @@ export default function AccountCoursesPage() {
       <Eyebrow>Learning</Eyebrow>
       <h1 className="mt-2 text-4xl font-bold tracking-[-0.05em] text-white">Enrolled courses</h1>
 
+      {stats && stats.currentStreak >= 1 && !stats.streakActiveToday && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border border-[#FF7A33]/30 bg-[#FF7A33]/[0.06] px-4 py-3 text-xs text-white animate-fade-in-up motion-reduce:animate-none">
+          <span>
+            🔥 Your <strong>{stats.currentStreak}-day streak</strong> ends today — complete a lesson to keep it going.
+          </span>
+          {continuing && (
+            <Link href={`/courses/${continuing.courseSlug}`} className="text-[#FF7A33] underline underline-offset-2 hover:text-white">
+              Continue learning →
+            </Link>
+          )}
+        </div>
+      )}
+
       {!user.emailVerified && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border border-white/10 bg-[#17181B] px-4 py-3 text-xs text-[#90939A] animate-fade-in-up motion-reduce:animate-none">
           <span>Your email isn&apos;t verified.</span>
@@ -90,7 +103,7 @@ export default function AccountCoursesPage() {
 
       {error && <p className="mt-4 text-sm text-[#F85149] animate-fade-in-up motion-reduce:animate-none">{error}</p>}
 
-      <div className="mt-8 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-5">
+      <div className="mt-8 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:grid-cols-6">
         {stats ? (
           <>
             <StatTile label="Courses enrolled" value={stats.coursesEnrolled} />
@@ -101,9 +114,10 @@ export default function AccountCoursesPage() {
               label="Avg. quiz score"
               value={stats.averageQuizScorePercent === null ? '—' : `${stats.averageQuizScorePercent}%`}
             />
+            <StatTile label="Current streak" value={stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '—'} />
           </>
         ) : (
-          Array.from({ length: 5 }).map((_, i) => <SkeletonStatTile key={i} />)
+          Array.from({ length: 6 }).map((_, i) => <SkeletonStatTile key={i} />)
         )}
       </div>
 
