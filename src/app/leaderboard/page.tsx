@@ -74,7 +74,11 @@ export default function LeaderboardPage() {
                       {entry.rank}
                     </span>
 
-                    {entry.avatarUrl ? (
+                    {entry.isAnonymous ? (
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-white/10 bg-[#0B0B0D] text-base" title="This user has chosen to stay anonymous">
+                        👻
+                      </span>
+                    ) : entry.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element -- cross-subdomain, session-cookie-gated asset; next/image can't proxy this
                       <img src={getAssetSrc(entry.avatarUrl)} alt="" className="h-9 w-9 shrink-0 border border-white/10 object-cover" />
                     ) : (
@@ -83,10 +87,20 @@ export default function LeaderboardPage() {
                       </span>
                     )}
 
-                    <Link href={`/u/${entry.id}`} className="flex-1 truncate text-sm font-semibold text-white transition-colors hover:text-[#FF7A33]">
-                      {entry.displayName}
-                      {isMe && <span className="ml-2 text-xs font-normal text-[#FF7A33]">(you)</span>}
-                    </Link>
+                    {entry.isAnonymous ? (
+                      // No link — an anonymized entry shouldn't offer a
+                      // path to a profile page at all, even though that
+                      // page would just show the same anonymized view.
+                      <span className="flex-1 truncate text-sm font-semibold text-white/70">
+                        {entry.displayName}
+                        {isMe && <span className="ml-2 text-xs font-normal text-[#FF7A33]">(you)</span>}
+                      </span>
+                    ) : (
+                      <Link href={`/u/${entry.id}`} className="flex-1 truncate text-sm font-semibold text-white transition-colors hover:text-[#FF7A33]">
+                        {entry.displayName}
+                        {isMe && <span className="ml-2 text-xs font-normal text-[#FF7A33]">(you)</span>}
+                      </Link>
+                    )}
 
                     <span className="shrink-0 text-sm font-bold tabular-nums text-white">{entry.xp.toLocaleString()} XP</span>
                   </li>

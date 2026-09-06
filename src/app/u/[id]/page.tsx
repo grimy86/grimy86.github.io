@@ -139,6 +139,15 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                   {avatarMutation.isPending ? '…' : 'Update'}
                 </span>
               </button>
+            ) : profile.isAnonymous ? (
+              // avatarUrl is already null server-side for an anonymized
+              // profile, so falling through to the initial-letter
+              // fallback below would just show "0" (the first character
+              // of the 0x... handle) — a ghost reads as deliberately
+              // anonymous rather than as a broken/missing avatar.
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center border border-white/10 bg-[#17181B] text-3xl" title="This user has chosen to stay anonymous">
+                👻
+              </div>
             ) : profile.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- cross-subdomain, session-cookie-gated asset; next/image can't proxy this
               <img src={getAssetSrc(profile.avatarUrl)} alt="" className="h-20 w-20 shrink-0 border border-white/10 object-cover" />

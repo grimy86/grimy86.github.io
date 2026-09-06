@@ -214,7 +214,15 @@ export async function getLibrary() {
 // which has no way to send the session cookie server-side (host-only on
 // api.lowlevelnotes.com, never visible to the Next.js server).
 
-export type CourseAuthor = { id: number; displayName: string }
+// Only on the public Course type below (getCourses/getCourse) — id is
+// null when this author has anonymize_course_authorship on, so the real
+// numeric id is withheld too, not just the name, and there's no way to
+// take it straight to /u/:id and see their (possibly still fully public)
+// real profile. The instructor-facing InstructorCourse/CourseAuthor pair
+// further down never anonymizes (an owner managing their own course sees
+// real co-authors, same as every other "own data" view on this site), so
+// that one stays non-nullable rather than sharing this type.
+export type PublicCourseAuthor = { id: number | null; displayName: string }
 export type CourseDifficulty = 'beginner' | 'intermediate' | 'advanced'
 export type CourseVisibility = 'public' | 'restricted'
 
@@ -228,7 +236,7 @@ export type Course = {
   iconUrl: string | null
   iconGlyph: string | null
   difficulty: CourseDifficulty | null
-  authors: CourseAuthor[]
+  authors: PublicCourseAuthor[]
 }
 
 export type LessonType = 'article' | 'video' | 'exercise' | 'quiz'
@@ -394,10 +402,36 @@ export type UserProfile = {
   bio: string | null
   joinedAt: string
   achievements: UserAchievement[]
+  // True only when anonymous_mode hid this profile's real data from the
+  // current viewer — never true for the owner viewing their own profile
+  // or for staff, who always see real data regardless of the setting.
+  isAnonymous: boolean
 }
 
 export function getUserProfile(id: number) {
   return authFetch<UserProfile>(`/v1/users/${id}/profile`)
+}
+
+export function getAnonymousMode() {
+  return authFetch<{ enabled: boolean }>('/v1/me/anonymous-mode')
+}
+
+export function setAnonymousMode(enabled: boolean) {
+  return authFetch<{ message: string }>('/v1/me/anonymous-mode', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export function getAnonymizeCourseAuthorship() {
+  return authFetch<{ enabled: boolean }>('/v1/me/anonymize-course-authorship')
+}
+
+export function setAnonymizeCourseAuthorship(enabled: boolean) {
+  return authFetch<{ message: string }>('/v1/me/anonymize-course-authorship', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  })
 }
 
 export function updateMyProfile(displayName: string, bio: string) {
@@ -428,6 +462,7 @@ export type LeaderboardEntry = {
   displayName: string
   avatarUrl: string | null
   xp: number
+  isAnonymous: boolean
 }
 
 export function getLeaderboard() {
@@ -732,6 +767,10 @@ export function getStaffAuditLog() {
 // public read endpoints.
 
 export type InstructorCourseStatus = 'draft' | 'pending_review' | 'published'
+
+// Real id always present — see PublicCourseAuthor's comment above for
+// why the instructor-facing shape doesn't share that type.
+export type CourseAuthor = { id: number; displayName: string }
 
 export type InstructorCourse = {
   id: number

@@ -8,7 +8,17 @@ import AuthSubmitButton from '@/components/auth/AuthSubmitButton'
 import AuthMessage from '@/components/auth/AuthMessage'
 import { useSession } from '@/components/SessionProvider'
 import { useToast } from '@/components/ToastProvider'
-import { changePassword, deleteMyAccount, getStreakReminderOptIn, setStreakReminderOptIn, unwrapResult } from '@/lib/authClient'
+import {
+  changePassword,
+  deleteMyAccount,
+  getStreakReminderOptIn,
+  setStreakReminderOptIn,
+  getAnonymousMode,
+  setAnonymousMode,
+  getAnonymizeCourseAuthorship,
+  setAnonymizeCourseAuthorship,
+  unwrapResult,
+} from '@/lib/authClient'
 import Eyebrow from '@/components/Eyebrow'
 import { Skeleton } from '@/components/Skeleton'
 
@@ -88,6 +98,11 @@ export default function AccountSecurityPage() {
         <StreakReminderToggle />
       </div>
 
+      <div className="mt-6 max-w-md border border-white/10 bg-[#17181B] p-5 flex flex-col gap-5">
+        <AnonymousModeToggle />
+        {(user.role === 'instructor' || user.role === 'staff') && <AnonymizeCourseAuthorshipToggle />}
+      </div>
+
       <div className="mt-10 max-w-md border border-[#F85149]/30 bg-[#17181B]">
         <DangerZone onDeleted={handleAccountDeleted} />
       </div>
@@ -131,6 +146,91 @@ function StreakReminderToggle() {
         <span className="block text-sm font-medium text-white">Email me if I&apos;m about to lose a streak</span>
         <span className="mt-1 block text-xs text-white/40">
           At most once a day, and only when you have a streak of 3+ days going and haven&apos;t studied yet that day.
+        </span>
+      </span>
+    </label>
+  )
+}
+
+// Hides real name/avatar/bio from other users on your public profile and
+// the leaderboard — replaced with a 👻 and a stable per-account handle
+// (0xA3F9C2-style) instead of a plain "REDACTED" so two anonymous users
+// never look identical. Doesn't hide achievements (not personally
+// identifying) and never hides anything from you or from staff — this is
+// only about what other regular users see. Independent of the
+// course-authorship toggle below: this one's about your social profile,
+// that one's about content credit, and a user might want either without
+// the other.
+function AnonymousModeToggle() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const { data } = useQuery({
+    queryKey: ['anonymousMode'],
+    queryFn: () => unwrapResult(getAnonymousMode()),
+  })
+
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => unwrapResult(setAnonymousMode(enabled)),
+    onSuccess: (_, enabled) => {
+      queryClient.setQueryData(['anonymousMode'], { enabled })
+      toast.success(enabled ? 'Profile anonymized.' : 'Profile no longer anonymous.')
+    },
+    onError: (error) => toast.error(error.message),
+  })
+
+  return (
+    <label className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        checked={data?.enabled ?? false}
+        disabled={!data || mutation.isPending}
+        onChange={(e) => mutation.mutate(e.target.checked)}
+        className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF7A33] disabled:opacity-50"
+      />
+      <span>
+        <span className="block text-sm font-medium text-white">Hide my identity from other users</span>
+        <span className="mt-1 block text-xs text-white/40">
+          Your public profile and leaderboard entry show a ghost and an anonymous handle instead of your real name/avatar/bio. Achievements still show. You and staff always see your real info.
+        </span>
+      </span>
+    </label>
+  )
+}
+
+// Only shown for instructor/staff — separate from AnonymousModeToggle
+// above on purpose (see that one's comment): this only affects the "by
+// <author>" byline on courses you've published or co-authored, nothing
+// about your profile/leaderboard presence.
+function AnonymizeCourseAuthorshipToggle() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const { data } = useQuery({
+    queryKey: ['anonymizeCourseAuthorship'],
+    queryFn: () => unwrapResult(getAnonymizeCourseAuthorship()),
+  })
+
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => unwrapResult(setAnonymizeCourseAuthorship(enabled)),
+    onSuccess: (_, enabled) => {
+      queryClient.setQueryData(['anonymizeCourseAuthorship'], { enabled })
+      toast.success(enabled ? 'Course authorship anonymized.' : 'Course authorship no longer anonymous.')
+    },
+    onError: (error) => toast.error(error.message),
+  })
+
+  return (
+    <label className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        checked={data?.enabled ?? false}
+        disabled={!data || mutation.isPending}
+        onChange={(e) => mutation.mutate(e.target.checked)}
+        className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF7A33] disabled:opacity-50"
+      />
+      <span>
+        <span className="block text-sm font-medium text-white">Hide my name on courses I&apos;ve published</span>
+        <span className="mt-1 block text-xs text-white/40">
+          Shows an anonymous handle instead of your name in the &quot;by&quot; byline on your published courses. Doesn&apos;t affect the course builder itself, only what other users see.
         </span>
       </span>
     </label>

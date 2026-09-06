@@ -1432,6 +1432,30 @@ main domain is scoped against — see below.
   honeypot's live alert (reserved for the two individually-meaningful
   cases). See WORKLOG's "CSP violation reports" entry for the full
   design and live verification.
+- Opt-in anonymous mode (2026-09-06) — two independent toggles,
+  `users.anonymous_mode` (public profile + leaderboard) and
+  `users.anonymize_course_authorship` (course "by <author>" bylines
+  only), migration `0033_anonymous_mode.sql`. Shows a stable per-user hex
+  handle (`0xA3F9C2`, `worker/lib/anonymize.js`'s `getAnonymousHandle`)
+  instead of a generic "REDACTED" — two anonymous users would otherwise
+  be indistinguishable from each other, and it matches the site's `0x`
+  branding. The handle is `sha256(ANON_HASH_SECRET + userId)`, never
+  `sha256(userId)` alone — user ids are small sequential integers,
+  trivially brute-forceable by hashing 1..N without a secret mixed in.
+  Owner and staff always see real data everywhere (profile page, course
+  management); the *leaderboard* is the one exception that anonymizes
+  uniformly for every viewer including staff and the account's own
+  owner, since it's one shared public list, not a per-viewer document.
+  `anonymizeCourseAuthors()` nulls the author's numeric `id` too, not
+  just their name, when this flag is on — course-authorship anonymity is
+  independent of profile anonymity, so leaving the id in would let
+  anyone take it straight to `/u/:id` and see a still-fully-public
+  profile. Second untracked-schema gap found this same day, different
+  shape from the first: `courses.icon_glyph` is read throughout the
+  codebase but no tracked migration ever adds it — confirmed against the
+  real production schema, patched in `worker/test/setup.js`, not fixed
+  for real. See WORKLOG's "Opt-in anonymous mode" entry for the full
+  design and the three scoping questions asked before writing any code.
 - Per-page metadata + a real `robots.ts`, first pass (2026-09-06) —
   prompted by discovering (grepped, not assumed) that literally every
   page except the root layout and the `/admin` decoy shared one generic

@@ -4496,3 +4496,123 @@ https://lowlevelnotes.com` got a `204` back with correct CORS headers,
 landed in D1 with a real IP — then deleted that one synthetic test row
 immediately after confirming, same as the changelog-entry cleanup
 earlier the same day, so it doesn't sit in the real report view forever.
+
+## Opt-in anonymous mode (2026-09-06)
+
+Two independent, opt-in privacy toggles, requested directly: hide a
+user's real identity on their public profile/the leaderboard, and
+separately, hide an instructor's real name on courses they've published.
+Scoped up front via three explicit questions before writing anything —
+achievements still show (not personally identifying), course-authorship
+anonymity is its own toggle rather than folded into the profile one
+(content credit vs. social profile are different concerns), and staff
+always see real data regardless (moderation shouldn't lose visibility
+because someone opted into privacy from other regular users).
+
+**The naming question.** User's own instinct going in was "REDACTED,"
+then asked directly for a better idea. Landed on a stable, per-user hex
+handle (`0xA3F9C2`) instead — plain "REDACTED" would make two different
+anonymous users on the same leaderboard indistinguishable from each
+other, and the `0x` format matches this site's existing branding better
+than a generic redaction word. Explicitly *not* `hash(userId)` alone —
+user ids are small sequential integers, trivially brute-forceable by
+hashing 1..N and matching — the hash mixes in a new Worker secret
+(`ANON_HASH_SECRET`, set via `wrangler secret put`, a random 32-byte hex
+value that never touched any file or terminal echo) so the handle is
+genuinely irreversible from outside, not just obfuscated. Deterministic
+per user, so the same account reads as one consistent identity across
+the profile page and the leaderboard rather than a fresh random one on
+every request.
+
+**Schema.** New migration `0033_anonymous_mode.sql`:
+`users.anonymous_mode`, `users.anonymize_course_authorship`, both
+`INTEGER NOT NULL DEFAULT 0`.
+
+**Shared logic (`worker/lib/anonymize.js`).** `getAnonymousHandle(env,
+userId)` — the hash computation above, one place, reused by the profile
+endpoint, the leaderboard, and course authorship.
+`anonymizeCourseAuthors(env, authors)` — post-processes an
+`authorsJsonSelect()`-shaped array, replacing `displayName` with the
+handle *and* nulling `id` entirely for any flagged author, not just the
+name. That's deliberate: `anonymize_course_authorship` is independent of
+`anonymous_mode`, so an instructor could anonymize their course byline
+while their profile page stays fully public — leaving the real numeric
+id in the response would let anyone take it straight to `/u/:id` and
+undo the whole point.
+
+**Where it applies, and where it deliberately doesn't:**
+- `getUserProfileV1` (`worker/routes/profile.js`) — anonymizes for
+  anyone who isn't the profile owner and isn't staff. Owner and staff
+  always get real data; achievements are untouched either way.
+- `getLeaderboardV1` (`worker/routes/leaderboard.js`) — anonymizes
+  uniformly for *every* viewer, including staff and the account's own
+  owner looking at their own row. Different rule from the profile page
+  on purpose: the leaderboard is one shared public list, not a
+  per-viewer document, so there's no clean way to personalize a row
+  differently per requester without breaking caching. A staff member who
+  needs to correlate an anonymous leaderboard entry to a real account
+  already has the actual staff panel for that.
+- `getCoursesV1`/`getCourseV1` (`worker/routes/courses.js`, the public
+  catalog) — run their mapped `authors` through `anonymizeCourseAuthors`
+  before responding. `worker/lib/courseAccess.js`'s `authorsJsonSelect()`
+  now carries each author's raw `anonymize_course_authorship` flag as
+  `anon` alongside id/displayName so callers have what they need to
+  decide.
+- Deliberately untouched: `staff.js`'s course listing and
+  `instructor.js`'s `getMyCourses`/`getMyCourse` (the owning instructor's
+  own course-management view) — same "own data / staff data stays real"
+  rule as the profile page. An instructor managing their own course sees
+  their real co-authors, not ghosts.
+- Four new opt-in endpoints (`GET`/`PUT /v1/me/anonymous-mode`,
+  `GET`/`PUT /v1/me/anonymize-course-authorship`), each its own tiny pair
+  rather than one combined settings object — matches the existing
+  streak-reminder-opt-in pattern exactly. No role check on the write side
+  for the course-authorship one even though it's only meaningful for
+  instructor/staff — harmless no-op for anyone else, simpler than gating
+  it; the frontend only shows that toggle for instructor+ roles.
+
+**Frontend.** Ghost avatar (👻) on `/u/[id]` and the leaderboard whenever
+`isAnonymous` is true, replacing the initial-letter fallback that would
+otherwise just show "0" (the first character of the `0x...` handle).
+Leaderboard rows for anonymous entries lose their `<Link>` to `/u/:id`
+entirely — plain text instead, matching "no link" from the original ask
+even though visiting that link would just show the same anonymized
+profile anyway. `Course['authors']` split into two distinct types
+(`PublicCourseAuthor`, `id: number | null` vs. the pre-existing
+`CourseAuthor`, `id: number`, now scoped to `InstructorCourse`) rather
+than widening one shared type — TypeScript now correctly refuses to let
+`account/build/[id]/page.tsx`'s co-author-removal button (which needs a
+real numeric id) accept a possibly-null one, instead of silently
+allowing a bug that could never actually trigger given the backend
+behavior, but shouldn't be typed as if it could. Two new checkboxes on
+`/account/security`, the course-authorship one only rendered for
+`instructor`/`staff` roles.
+
+**A second, different kind of untracked-schema gap, found by accident.**
+Writing the course-authorship tests hit `no such column: icon_glyph` —
+that column is read throughout `courses.js`/`instructor.js`/
+`mappers.js` but, unlike the resources/site_settings/tools/changelog gap
+from the first test-suite session, this isn't a whole table predating
+migrations — it's one column added directly to production D1 by hand
+after `0017_course_groups_metadata.sql`, never captured as its own
+migration file. Confirmed against the real schema (`wrangler d1 execute
+... "SELECT sql FROM sqlite_master WHERE name='courses'"`) before
+assuming — production has it as a trailing ALTER-added column, no
+tracked migration does. Patched the test fixture (`worker/test/setup.js`,
+one `ALTER TABLE` after migrations run) the same way as the earlier gap:
+good enough to test against, not a substitute for capturing it as a real
+migration.
+
+**Testing and deploy.** `worker/test/anonymous-mode.test.js`: the hash's
+stability and uniqueness, profile anonymization for a third party vs. the
+owner vs. staff, leaderboard anonymization being uniform across all three
+of those (a real behavioral difference from the profile page, worth its
+own explicit test), course-authorship anonymization hiding both name and
+id on the public endpoints while leaving the instructor's own
+`getMyCourse` view untouched, and the opt-in endpoints round-tripping.
+54/54 across the whole suite. Migration applied to production
+(`wrangler d1 migrations apply --remote`), `ANON_HASH_SECRET` set,
+Worker deployed, `/health` confirmed OK. No live account session was
+available to verify further end-to-end (the earlier test account's
+session had already expired) — covered by the test suite instead, same
+situation as the streak-reminder feature earlier the same day.
