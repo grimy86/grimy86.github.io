@@ -1,4 +1,10 @@
+import type { Metadata } from 'next'
 import Eyebrow from '@/components/Eyebrow'
+
+export const metadata: Metadata = {
+  title: 'Privacy',
+  description: 'What data lowlevelnotes collects and why, based on what the code actually does — no analytics, no ad tracking, nothing sold or shared for marketing.',
+}
 
 export default function PrivacyPage() {
   return (

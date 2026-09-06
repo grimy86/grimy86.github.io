@@ -20,6 +20,7 @@ import {
   getStaffPendingCounts,
   getStaffHoneypotHits,
   confirmHoneypotHitBenign,
+  getStaffCspReports,
   unwrapResult,
   roleLabel,
   type Role,
@@ -32,8 +33,8 @@ import RoleRequestsPanel from '@/components/admin/RoleRequestsPanel'
 import ResourceRequestsPanel from '@/components/admin/ResourceRequestsPanel'
 import CourseRequestsPanel from '@/components/admin/CourseRequestsPanel'
 
-type Tab = 'users' | 'ips' | 'honeypot' | 'log' | 'requests'
-const TAB_IDS: Tab[] = ['users', 'ips', 'honeypot', 'requests', 'log']
+type Tab = 'users' | 'ips' | 'honeypot' | 'log' | 'requests' | 'csp'
+const TAB_IDS: Tab[] = ['users', 'ips', 'honeypot', 'requests', 'csp', 'log']
 
 const ACTION_LABELS: Record<string, string> = {
   role_change: 'Role change',
@@ -98,6 +99,7 @@ export default function AdminPanel() {
     { id: 'ips', label: 'Blocked IPs' },
     { id: 'honeypot', label: 'Honeypot' },
     { id: 'requests', label: 'Requests', badge: pendingTotal },
+    { id: 'csp', label: 'CSP Reports' },
     { id: 'log', label: 'Activity log' },
   ]
 
@@ -149,6 +151,7 @@ export default function AdminPanel() {
             </div>
           </div>
         )}
+        {tab === 'csp' && <CspReportsSection />}
         {tab === 'log' && <AuditLogSection />}
       </div>
     </div>
@@ -606,6 +609,49 @@ function HoneypotSection() {
                 </button>
               )}
             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ==================== CSP reports ==================== */
+
+// Read-only, like Honeypot/Activity log above — nothing to configure
+// here, just a grouped view of what Content-Security-Policy-Report-Only
+// (next.config.ts) would have blocked if it were actually enforced. The
+// point of this tab: confirm it's empty (or everything left is expected)
+// before flipping that header from Report-Only to enforced. Grouped by
+// (violatedDirective, blockedUri) server-side already — the same broken
+// directive fires once per blocked resource per pageload across every
+// visitor, so raw rows would mostly be near-duplicates.
+function CspReportsSection() {
+  const { data, error } = useQuery({ queryKey: ['staffCspReports'], queryFn: () => unwrapResult(getStaffCspReports()) })
+
+  return (
+    <div>
+      <SectionHeading>CSP reports</SectionHeading>
+      <p className="mt-2 max-w-2xl text-sm text-[#90939A]">
+        What the Report-Only Content-Security-Policy would have blocked if it were enforced. Grouped by directive and blocked resource — a count of 1 might be a fluke, a high count across many visitors means the policy is missing something real.
+      </p>
+
+      {error && <p className="mt-4 text-sm text-[#F85149] animate-fade-in-up motion-reduce:animate-none">{error.message}</p>}
+
+      <div className="mt-6 border-l border-t border-white/10">
+        {data === undefined && !error && <SkeletonRow count={3} />}
+        {data?.groups.length === 0 && <p className="border-b border-r border-white/10 bg-[#17181B] p-4 text-sm text-[#90939A]">No violations reported — the policy is clean so far.</p>}
+        {data?.groups.map((g, i) => (
+          <div key={`${g.violatedDirective}-${g.blockedUri}-${i}`} className="border-b border-r border-white/10 bg-[#17181B] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-medium text-white">{g.violatedDirective ?? 'unknown directive'}</span>
+              <span className="text-xs uppercase tracking-[0.1em] text-[#F0B429]">{g.count}×</span>
+            </div>
+            <p className="mt-1 break-all font-mono text-xs text-[#90939A]">blocked: {g.blockedUri ?? 'unknown'}</p>
+            {g.sourceFile && <p className="mt-1 break-all text-xs text-white/40">on {g.sourceFile}</p>}
+            <p className="mt-2 text-xs text-white/40">
+              first {new Date(g.firstSeenAt).toLocaleString()} · last {new Date(g.lastSeenAt).toLocaleString()}
+            </p>
           </div>
         ))}
       </div>

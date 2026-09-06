@@ -4333,3 +4333,166 @@ If nothing shows up after a reasonable soak, the policy can move from
 `Content-Security-Policy-Report-Only` to the real enforced
 `Content-Security-Policy` header (merging it with the existing
 `frame-ancestors 'none'` line rather than keeping two separate headers).
+
+## Per-page metadata and a real robots.txt (2026-09-06)
+
+Grew out of a "what would you build next, remember we don't have a lot
+of users" discussion — the fork spawned to check the premise found
+something bigger than expected: `/courses/*` isn't just under-optimized
+for SEO, it's structurally unindexable (fully session-gated, no
+anonymous preview at all) and there was no `robots.ts`, no per-page
+metadata anywhere except `/admin`, and `sitemap.ts` only ever listed two
+routes. The original plan was a public course-landing-page teaser
+(title/description/curriculum outline, never lesson content) plus
+metadata plus robots.txt, in that order. Mid-implementation — right
+after reading through the current `/courses/[course]/page.tsx` to scope
+the teaser split — the user pulled that piece: "keep the courses as is,"
+and re-sequenced to metadata first, then robots.txt. Course pages are
+untouched; everything below is metadata/crawler-directive only.
+
+**Site-wide title template.** `src/lib/site.ts`'s `metaData.title` went
+from a plain string to `{ default: 'lowlevelnotes', template: '%s —
+0xLLN' }`. Next.js applies the template to every descendant page that
+sets its own plain-string `title`, so each new per-page title below
+reads as e.g. "Log In — 0xLLN" in the browser tab without hardcoding the
+suffix anywhere.
+
+**Server-component pages** (trivial — just add the export):
+`/privacy`, `/terms`, `/changelog` each got real `title`/`description`
+pulled from their own actual page content, not generic copy.
+`/reset-password` and `/verify-email` got `title` plus
+`robots: { index: false }` — same reasoning `sitemap.ts` already
+documented for excluding them (single-use tokens live in the query
+string; nothing there is worth a search engine caching).
+
+**Client-component pages** (`/login`, `/register`, `/forgot-password`):
+Next.js only reads `metadata` exports from Server Components, and these
+three are `'use client'` (Turnstile, session-redirect effects, form
+state). Split each into a thin server `page.tsx` — exports `metadata`,
+renders one child — plus a same-directory `*PageClient.tsx` holding the
+original component verbatim, renamed (e.g.
+`src/app/login/LoginPageClient.tsx`, `LoginPageClient()`). No logic
+changed, confirmed via diff — this was a pure mechanical split.
+`/forgot-password` additionally got `robots: { index: false, follow:
+true }`: unlike login/register (real search/social value — people do
+search "[site] login"), nobody searches for a password-reset entry
+point, and it's not worth appearing in results.
+
+**New `src/app/robots.ts`** (Next.js's dynamic convention — matches
+`sitemap.ts`'s own pattern, already in the same directory, rather than a
+static `public/robots.txt`). Allows `/`; disallows everything that's
+session-gated and therefore guaranteed-empty for an anonymous crawler
+(`/account/`, `/courses`, `/leaderboard`, `/library`, `/u/`) — same set
+`sitemap.ts` already excluded, just now enforced as an actual crawler
+directive instead of only an absence from the sitemap — plus the
+token/utility auth pages and `/api/*` (server-to-server plumbing, not
+content). Points `Sitemap:` at the real `sitemap.xml`.
+
+**The one thing checked twice before shipping: `/admin` is not in the
+Disallow list.** That's deliberate and already established policy — both
+`admin/page.tsx`'s own metadata comment and `sitemap.ts`'s exclusion
+comment already say why: listing a path in `robots.txt` is itself a
+common way scanners *discover* "interesting" paths, which would defeat
+the entire point of a decoy admin login that exists specifically to
+catch people guessing at exactly that kind of path. `admin/page.tsx`
+already sets its own `noindex`/`nofollow` meta tag directly, which is
+the correct way to keep a *known* URL out of search results without
+advertising it via a public, crawlable file.
+
+**`sitemap.ts`** gained `/privacy` and `/terms` — both genuinely public
+and evergreen; re-reading its own exclusion comment, neither was ever
+actually named as deliberately excluded, they'd just been missed.
+
+**Verification, not assumption:** `next build` clean, then a live `next
+start` + `curl` round confirmed the real rendered `<title>` on all nine
+touched pages (including the "— 0xLLN" suffix actually applying), the
+`robots` meta tag on the noindexed ones, and the real byte-for-byte
+output of `/robots.txt` and `/sitemap.xml` — not just that the files
+compiled. Full test suite still 36/36 (no Worker code touched by any of
+this).
+
+## CSP violation reports: table, staff tab, digest (2026-09-06)
+
+Follow-up prompted by the user asking, reasonably, how to actually see
+Report-Only CSP violations — the header shipped earlier the same day had
+no `report-uri`/`report-to` at all, so violations only ever reached each
+visitor's own browser console, invisible to anyone else. Requested
+explicitly: "just like everything else" — a table, storing it safely,
+surfaced on `/account/staff` and in Discord, the same treatment every
+other security signal this session already got.
+
+**Why `report-uri`, not `report-to`/the Reporting API:** `report-uri` is
+deprecated in the CSP3 spec but still universally implemented; `report-to`
+needs an extra `Reporting-Endpoints` header and has inconsistent-to-absent
+browser support. One directive, works everywhere, no second header to
+keep in sync.
+
+**Schema.** New `csp_reports` table (migration `0032_csp_reports.sql`):
+`document_uri`, `violated_directive`, `effective_directive`,
+`blocked_uri`, `source_file`, `line_number`, `column_number`,
+`disposition`, `ip`, `user_agent`, `created_at`. No `user_id` — reports
+arrive straight from any visitor's browser, unauthenticated, same as
+`honeypot_hits`.
+
+**Ingestion (`logCspReportV1`, `worker/routes/security.js`,
+`POST /v1/csp-reports`).** Genuinely public and unauthenticated —
+unlike `logHoneypotHitV1` right above it (gated on `INTERNAL_API_KEY`
+since Next.js middleware calls it server-to-server), a CSP report is
+posted directly by the visitor's browser, which can't attach a secret
+header to it at all. Parses the classic `{"csp-report": {...}}`
+wire format (hyphenated keys — not something we control, it's what every
+browser actually sends), every field length-capped before insert.
+Self-contained rate limit against `csp_reports` directly, same reasoning
+`reportSecurityEventV1` already established for not adding a new
+`auth_events.event_type` CHECK-constraint value — keyed by IP rather than
+a user id since the caller is never authenticated, capped higher (120/hour)
+than that one's 60/hour since a single genuinely-broken page load can
+legitimately fire several distinct violations at once, one per blocked
+resource. Returns a bare `204` (with `corsHeaders()` added defensively) —
+browsers don't read or care about the response to a violation report.
+`next.config.ts`'s CSP gained `report-uri https://api.lowlevelnotes.com/v1/csp-reports`,
+pointed straight at the Worker rather than proxying through a Next.js API
+route — skips a hop, and the endpoint has to be public either way.
+
+**Staff visibility (`listCspReportsStaffV1`,
+`GET /v1/staff/csp-reports`).** Grouped server-side by
+`(violated_directive, blocked_uri)`, not a raw row listing — the same
+broken directive fires once per blocked resource per pageload across
+every visitor, so raw rows are mostly near-duplicates; a count is what's
+actually actionable ("this directive needs another origin allowed"), not
+400 nearly-identical entries. New "CSP Reports" tab on `/account/staff`
+(`AdminPanel.tsx`) — read-only, same shape as Honeypot/Activity log,
+nothing to configure, just a signal to watch before flipping Report-Only
+to enforced.
+
+**Discord — folded into the existing digest, not live-alerted.** Explicit
+decision, not the default: a single misconfigured directive can throw
+dozens of reports per pageload across every visitor, the same
+high-volume/low-individual-value shape `postDailySecurityDigest` already
+exists for (as opposed to honeypot's live alert, reserved for the two
+cases that are individually meaningful — a POST or a matched account).
+`postDailySecurityDigest` (`worker/cron.js`) now also queries the last
+24h of `csp_reports` grouped the same way, and includes a CSP section in
+the digest embed only when there's anything to show — the "silently
+no-op, no '0 events today' spam" rule from the original digest now
+applies independently to each half (security events, CSP), not just the
+combined total.
+
+**Testing and deploy.** `worker/test/csp-reports.test.js`: ingestion
+accepts a real browser-shaped report with no auth, rejects a malformed/
+missing `csp-report` wrapper and invalid JSON, staff listing 403s a
+non-staff caller, and — the one that actually matters — three reports of
+the identical violation collapse into one group with `count: 3` rather
+than three rows. One test needed a unique `blocked-uri` per run after an
+initial failure: this plugin's storage isolation is per test *file*, not
+per test case, so an earlier test in the same file inserting the same
+default report shape left a row that inflated the count by one — fixed
+by making the test self-contained instead of assuming a clean slate,
+not by loosening the assertion. 41/41 across the whole suite. Migration
+applied to production (`wrangler d1 migrations apply --remote`, detected
+via `migrations list` first), Worker deployed, then live-verified against
+the real production endpoint: a real POST with `Origin:
+https://lowlevelnotes.com` got a `204` back with correct CORS headers,
+landed in D1 with a real IP — then deleted that one synthetic test row
+immediately after confirming, same as the changelog-entry cleanup
+earlier the same day, so it doesn't sit in the real report view forever.

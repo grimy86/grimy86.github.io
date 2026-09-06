@@ -113,7 +113,15 @@ export const siteConfig = {
         },
 
     metaData: {
-        title: "lowlevelnotes",
+        // template applies to every page that sets its own `title` (the
+        // browser tab reads e.g. "Log In — 0xLLN" instead of a bare
+        // "lowlevelnotes" repeated on every single page); `default` is
+        // what a page with no title of its own falls back to — the
+        // homepage itself, and anything not yet given real metadata.
+        title: {
+            default: "lowlevelnotes",
+            template: "%s — 0xLLN",
+        },
         name: "lowlevelnotes",
 
         description: 

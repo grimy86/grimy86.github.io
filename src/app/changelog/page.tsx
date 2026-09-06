@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { getChangelog } from '@/lib/api'
 import ChangelogEntryCard from '@/components/ChangelogEntryCard'
 import ChangelogJumpNav from '@/components/ChangelogJumpNav'
@@ -5,6 +6,11 @@ import Eyebrow from '@/components/Eyebrow'
 import type { ChangelogEntry } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'Changelog',
+  description: 'Everything shipped on lowlevelnotes, newest first — new courses, features, and fixes.',
+}
 
 // A release's year, for grouping — falls back to null (no divider) rather
 // than throwing if release_date is ever in a format Date() can't parse,

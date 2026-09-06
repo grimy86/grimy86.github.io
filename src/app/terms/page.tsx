@@ -1,4 +1,10 @@
+import type { Metadata } from 'next'
 import Eyebrow from '@/components/Eyebrow'
+
+export const metadata: Metadata = {
+  title: 'Terms of Use',
+  description: 'Plain rules for using lowlevelnotes — acceptable use, content ownership, and account responsibilities. Not a wall of boilerplate.',
+}
 
 export default function TermsPage() {
   return (

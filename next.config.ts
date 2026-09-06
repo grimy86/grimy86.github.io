@@ -47,6 +47,21 @@ const nextConfig: NextConfig = {
   // SVG/placeholder images). connect-src/frame-src allow
   // challenges.cloudflare.com for Turnstile (its script, background
   // verification calls, and the challenge iframe itself all need it).
+  //
+  // report-uri points at the Worker (worker/routes/security.js's
+  // logCspReportV1), not a Next.js API route — same reason
+  // report-to/the Reporting API isn't used instead: report-uri is the
+  // one directive every browser actually implements consistently, and a
+  // browser POSTs the report directly, with no custom headers, so the
+  // endpoint has to be genuinely public and unauthenticated regardless of
+  // which app it lives in. Landing it straight on the Worker skips an
+  // unnecessary Next.js proxy hop. Reports are stored in D1 (`csp_reports`
+  // table, migration 0032), visible grouped-by-directive on the staff
+  // panel's CSP Reports tab, and rolled into the existing daily security
+  // digest — not live-alerted, since one broken directive fires once per
+  // blocked resource per pageload across every visitor, the same
+  // high-volume/low-individual-value shape the security-events digest
+  // already exists for.
   async headers() {
     const reportOnlyCsp = [
       "default-src 'self'",
@@ -61,6 +76,7 @@ const nextConfig: NextConfig = {
       "base-uri 'self'",
       "form-action 'self'",
       "upgrade-insecure-requests",
+      "report-uri https://api.lowlevelnotes.com/v1/csp-reports",
     ].join('; ')
 
     return [

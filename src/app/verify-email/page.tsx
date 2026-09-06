@@ -1,6 +1,14 @@
+import type { Metadata } from 'next'
 import AuthPageShell from '@/components/auth/AuthPageShell'
 import AuthMessage from '@/components/auth/AuthMessage'
 import VerifyEmailResult from './VerifyEmailResult'
+
+// noindex — same reasoning as reset-password/page.tsx: a single-use
+// token in the query string, nothing here worth a search engine caching.
+export const metadata: Metadata = {
+  title: 'Verify Email',
+  robots: { index: false, follow: false },
+}
 
 export default async function VerifyEmailPage({
   searchParams,

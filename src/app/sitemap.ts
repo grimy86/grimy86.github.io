@@ -4,9 +4,11 @@ import { getChangelog } from '@/lib/api'
 // Deliberately excludes every other route in src/app: /account, /login,
 // /register, /forgot-password, /reset-password, and /verify-email have no
 // SEO value (auth flows, some carrying single-use tokens in the query
-// string), and /library requires a session — an anonymous crawler would
-// only ever see a redirect to /login, not real content, so indexing it
-// would be indexing an empty page.
+// string), and /courses, /leaderboard, /library, and /u/* all require a
+// session — an anonymous crawler would only ever see a loading skeleton
+// that redirects client-side, not real content, so indexing them would be
+// indexing an empty page (see robots.ts, which disallows the same set).
+// /privacy and /terms are genuinely public and evergreen, so they're in.
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // /changelog's lastModified reflects the actual latest release date
   // instead of always claiming "just changed" — falls back to now if the
@@ -33,6 +35,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: changelogLastModified,
       changeFrequency: 'weekly',
       priority: 0.5,
+    },
+    {
+      url: 'https://lowlevelnotes.com/privacy',
+      changeFrequency: 'yearly',
+      priority: 0.2,
+    },
+    {
+      url: 'https://lowlevelnotes.com/terms',
+      changeFrequency: 'yearly',
+      priority: 0.2,
     },
   ]
 }

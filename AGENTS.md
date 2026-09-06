@@ -1415,6 +1415,68 @@ main domain is scoped against — see below.
   pipeline. See WORKLOG's "First resource-loading CSP" entry for the
   full reasoning and the "browse with devtools open, then flip to
   enforced" follow-up.
+- CSP violation reports get the same treatment as every other security
+  signal (2026-09-06) — `report-uri` (not `report-to`/the Reporting API;
+  simpler, universally implemented) in `next.config.ts`'s CSP now points
+  at `POST /v1/csp-reports` (`logCspReportV1`,
+  `worker/routes/security.js`), genuinely public/unauthenticated since a
+  browser posts a violation report directly with no way to attach a
+  secret header. Stored in `csp_reports` (migration
+  `0032_csp_reports.sql`), surfaced grouped-by-`(violated_directive,
+  blocked_uri)` on a new "CSP Reports" tab
+  (`AdminPanel.tsx`/`GET /v1/staff/csp-reports`), and folded into the
+  existing `postDailySecurityDigest` (`worker/cron.js`) rather than
+  live-alerted — a single broken directive fires once per blocked
+  resource per pageload across every visitor, the same high-volume/
+  low-individual-value shape that digest already exists for, unlike
+  honeypot's live alert (reserved for the two individually-meaningful
+  cases). See WORKLOG's "CSP violation reports" entry for the full
+  design and live verification.
+- Per-page metadata + a real `robots.ts`, first pass (2026-09-06) —
+  prompted by discovering (grepped, not assumed) that literally every
+  page except the root layout and the `/admin` decoy shared one generic
+  `<title>`/description, there was no `robots.ts` at all, and
+  `sitemap.ts` only ever listed `/` and `/changelog`. Scope was
+  deliberately narrowed mid-task: a public course-landing-page teaser
+  (title/description/curriculum outline, no lesson content) was
+  scoped and half-planned, then the user pulled it — "keep the courses
+  as is" — leaving `/courses/*` exactly as session-gated as the "reversed
+  from Slice 1's original 'catalog is public' call" decision above
+  already set it. What shipped instead:
+  - `src/lib/site.ts`'s site-wide `metaData.title` became `{ default:
+    'lowlevelnotes', template: '%s — 0xLLN' }` — every page below now
+    gets a distinct, branded tab title for free once it sets its own
+    plain-string `title`, instead of needing the suffix hardcoded
+    per page.
+  - Real `title`/`description` added to every genuinely public page that
+    lacked one: `/privacy`, `/terms`, `/changelog` (all already Server
+    Components, trivial). `/login`, `/register`, `/forgot-password` were
+    `'use client'`, and Next.js only reads `metadata` from Server
+    Components — each got split into a thin server `page.tsx` (exports
+    `metadata`, renders the client component) plus a same-directory
+    `*PageClient.tsx` carrying the unchanged original logic (e.g.
+    `src/app/login/LoginPageClient.tsx`). `/reset-password`/
+    `/verify-email` (already Server Components) got `title` plus explicit
+    `robots: { index: false }` — same reasoning `sitemap.ts` already gave
+    for excluding them (single-use tokens in the query string).
+  - New `src/app/robots.ts` (Next.js's dynamic convention, matching
+    `sitemap.ts`'s own pattern already in the same directory): allows
+    `/`, disallows everything session-gated
+    (`/account/`, `/courses`, `/leaderboard`, `/library`, `/u/`) plus the
+    token/utility auth pages, points `Sitemap:` at the real
+    `sitemap.xml`. **Deliberately excludes `/admin`** from the Disallow
+    list — same reasoning already documented on the honeypot decoy
+    itself and in `sitemap.ts`: listing a path in `robots.txt` is itself
+    how scanners discover "interesting" paths, which would defeat the
+    entire point of a decoy that already sets its own noindex meta tag
+    directly.
+  - `sitemap.ts` gained `/privacy` and `/terms` — genuinely public,
+    evergreen pages that its own exclusion comment never actually named;
+    they'd simply been overlooked, not deliberately left out.
+  - Verified for real, not just built: `next build` clean, then a live
+    `next start` + `curl` confirmed every page's actual `<title>` and
+    `robots` meta tag, plus the real rendered `/robots.txt` and
+    `/sitemap.xml` output.
 
 ### Learning and motivation model
 

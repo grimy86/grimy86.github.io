@@ -675,6 +675,23 @@ export function confirmHoneypotHitBenign(id: number) {
   return authFetch<{ message: string }>(`/v1/staff/honeypot-hits/${id}/confirm-benign`, { method: 'PUT' })
 }
 
+// Grouped by (violatedDirective, blockedUri) server-side, not raw
+// rows — the same broken directive fires once per blocked resource per
+// pageload across every visitor, so a raw list would be mostly
+// near-duplicates.
+export type CspReportGroup = {
+  violatedDirective: string | null
+  blockedUri: string | null
+  sourceFile: string | null
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export function getStaffCspReports() {
+  return authFetch<{ groups: CspReportGroup[] }>('/v1/staff/csp-reports')
+}
+
 // -------- Staff: blocked IPs --------
 
 export function getStaffBlockedIps() {
