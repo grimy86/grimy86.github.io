@@ -8,6 +8,7 @@ import { useSession } from '@/components/SessionProvider'
 import { useToast } from '@/components/ToastProvider'
 import { Skeleton, SkeletonStatTile } from '@/components/Skeleton'
 import {
+  getCourseCertificateUrl,
   getMyProgress,
   getMyStatistics,
   resendVerification,
@@ -103,9 +104,10 @@ export default function AccountCoursesPage() {
 
       {error && <p className="mt-4 text-sm text-[#F85149] animate-fade-in-up motion-reduce:animate-none">{error}</p>}
 
-      <div className="mt-8 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mt-8 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:grid-cols-7">
         {stats ? (
           <>
+            <StatTile label={`${stats.xp.toLocaleString()} XP`} value={`Lv ${stats.level}`} />
             <StatTile label="Courses enrolled" value={stats.coursesEnrolled} />
             <StatTile label="Courses completed" value={stats.coursesCompleted} />
             <StatTile label="Lessons completed" value={stats.lessonsCompleted} />
@@ -117,7 +119,7 @@ export default function AccountCoursesPage() {
             <StatTile label="Current streak" value={stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '—'} />
           </>
         ) : (
-          Array.from({ length: 6 }).map((_, i) => <SkeletonStatTile key={i} />)
+          Array.from({ length: 7 }).map((_, i) => <SkeletonStatTile key={i} />)
         )}
       </div>
 
@@ -209,6 +211,16 @@ function EnrollmentCard({ enrollment }: { enrollment: MyEnrollment }) {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          {enrollment.status === 'completed' && (
+            <a
+              href={getCourseCertificateUrl(enrollment.courseSlug)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-white/50 underline underline-offset-2 transition-colors hover:text-white"
+            >
+              Certificate
+            </a>
+          )}
           <Link
             href={`/courses/${enrollment.courseSlug}`}
             className="text-sm font-medium text-white transition-colors hover:text-[#FF7A33]"

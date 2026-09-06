@@ -102,6 +102,7 @@ export default function LeaderboardPage() {
                       </Link>
                     )}
 
+                    <span className="shrink-0 border border-white/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white/50">Lv {entry.level}</span>
                     <span className="shrink-0 text-sm font-bold tabular-nums text-white">{entry.xp.toLocaleString()} XP</span>
                   </li>
                 )

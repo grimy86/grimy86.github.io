@@ -369,6 +369,8 @@ export type MyStatistics = {
   averageQuizScorePercent: number | null
   currentStreak: number
   streakActiveToday: boolean
+  xp: number
+  level: number
 }
 
 export function getMyStatistics() {
@@ -486,6 +488,7 @@ export type LeaderboardEntry = {
   displayName: string
   avatarUrl: string | null
   xp: number
+  level: number
   isAnonymous: boolean
 }
 
@@ -637,6 +640,14 @@ export function getResourceRequestFileUrl(id: number) {
   return `${AUTH_API_BASE}/v1/resource-requests/${id}/file`
 }
 
+// Generated on the spot by the Worker, never stored — a plain link
+// (relying on the session cookie riding along on the navigation, same
+// as getResourceRequestFileUrl above) rather than a fetch+blob dance,
+// since there's nothing to fetch ahead of time.
+export function getCourseCertificateUrl(courseSlug: string) {
+  return `${AUTH_API_BASE}/v1/courses/${courseSlug}/certificate`
+}
+
 export function getStaffResourceRequests(status?: RequestStatus) {
   return authFetch<StaffResourceRequest[]>(`/v1/staff/resource-requests${status ? `?status=${status}` : ''}`)
 }
@@ -778,14 +789,9 @@ export function unblockIp(id: string) {
 
 // -------- Audit log --------
 
-export type AuditLogEntry = {
-  id: number
-  actorEmail: string
-  action: string
-  targetLabel: string | null
-  detail: string | null
-  createdAt: string
-}
+export type AuditLogEntry =
+  | { kind: 'staff_action'; id: number; actorEmail: string; action: string; targetLabel: string | null; detail: string | null; createdAt: string }
+  | { kind: 'signup'; id: number; email: string; displayName: string; createdAt: string }
 
 export function getStaffAuditLog() {
   return authFetch<AuditLogEntry[]>('/v1/staff/audit-log')

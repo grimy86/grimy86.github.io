@@ -5071,3 +5071,189 @@ rather than claiming full verification. Not yet deployed anywhere —
 same "ask before starting" pattern as the last deploy: migration 0036
 hasn't been applied to production, the Worker hasn't been redeployed,
 and nothing has been pushed.
+
+Migration 0036 applied to production D1 and the Worker redeployed (user
+approved after review) — `/health` confirmed OK. Frontend commit message
+handed to the user as text, not committed by me.
+
+## XP levels + a forward-looking "reach level 5" achievement (2026-09-06)
+
+Next item from the same "frontend ideas" conversation. User's specific
+constraints going in: levels should feel like "a bit of a grind," not a
+raw XP number relabeled (explicitly didn't want something like level
+6431), and the new achievement should exist now even though nobody can
+reach it yet with the current course catalog — a deliberately
+forward-looking addition, not something scoped down to what's already
+achievable.
+
+- `worker/lib/xp.js`: new `xpToLevel(xp) = floor(sqrt(xp / 150)) + 1`.
+  Calibrated against real production data rather than picked arbitrarily:
+  checked the actual top XP total live (1410, one real account) and
+  chose 150 so that account lands at level 4 — close to level 5, not
+  already past it, which is what makes "reach level 5" a genuine
+  forward-looking goal instead of something trivially already unlocked.
+  The curve roughly quadruples the XP cost every level (doubling your
+  level needs ~4x the XP), so a very heavily active long-term account
+  (rough estimate: ~9000 XP) still only reaches the high teens/twenties,
+  nowhere near an absurd number.
+- Surfaced in two places: `GET /v1/leaderboard` (`level` alongside the
+  existing `xp` per entry) and `GET /v1/me/statistics` (which didn't
+  expose XP at all before this — a real, previously-unnoticed gap, since
+  the only place to see your own XP was the public leaderboard).
+- `worker/migrations/0037_levels_achievement.sql` adds a `level_reached`
+  criteria type and a new `level-5` ("Leveling Up") achievement.
+  Extending `achievements.criteria_type`'s CHECK constraint means
+  recreating the table, and it has a CASCADE child
+  (`user_achievements`) — followed the exact proven-safe rename-away/
+  recreate/rebuild-child/drop-original procedure `0022` already
+  established for the same situation, rather than a bare DROP+CREATE
+  (documented in 0014/0019 as reproducing a real D1 cascade-delete bug).
+- `level_reached` slots into the existing achievement-progress machinery
+  from earlier today with no special-casing: `achievementSatisfies`
+  gained one switch case, and `currentValueForCriteria` treats level the
+  same as the other three numeric targets — so a locked "reach level 5"
+  shows real "3/5"-style progress to its owner, for free.
+- Frontend: a "Lv N" tag next to XP on the leaderboard, a new XP/Level
+  stat tile on `/account/courses` (first tile now, grid widened to 7
+  columns), and a new `ZapIcon` (Primer Octicons' actual `zap-16`,
+  `curl`'d from the project's repo, not redrawn) for the achievement
+  tile.
+- `worker/test/levels.test.js`, 7 new tests: the curve's shape (starts
+  at 1, monotonically non-decreasing, stays well under 100 even for a
+  heavy realistic XP total), that the leaderboard and statistics
+  endpoints both report a level consistent with the same formula, that
+  a locked `level-5` shows the owner real progress, and that actually
+  reaching level 5 (verified by granting XP until `xpToLevel` itself
+  says so, then completing a real lesson through
+  `POST /v1/lessons/:id/complete` to trigger `evaluateAchievementsV1`
+  the normal way) unlocks it for real.
+
+125/125 across the whole suite. `npx tsc --noEmit` clean.
+
+## Certificate of completion, generated on the spot (2026-09-06)
+
+Last item from the same "frontend ideas" conversation — this one was
+literally on the original Phase 9 gamification roadmap and never got
+built. User's specific constraint: a real PDF, and explicitly *not*
+stored anywhere — generate it fresh on every request.
+
+Researched rather than assumed a library would work in this Worker:
+this project doesn't turn on the `nodejs_compat` compatibility flag, so
+anything relying on Node's `fs`/streams (most "HTML to PDF" tooling,
+including headless-Chromium-based approaches) is a non-starter without
+a bigger infra change. Confirmed via web search that `pdf-lib` is pure
+JavaScript with no native code or filesystem access — runs unchanged on
+workerd — and its `StandardFonts` (Helvetica etc.) are built into the
+PDF spec itself, so nothing needs to be shipped or fetched for text
+rendering. Verified for real, not just trusted the write-up: wrote a
+throwaway-turned-real test that generates a PDF inside the actual
+workerd test environment and re-parses it with `PDFDocument.load()` —
+it works.
+
+- `npm install pdf-lib` (added to the main `package.json` — the Worker
+  shares the repo's one `node_modules`, no separate package.json).
+  Bundle size grew from ~209 KiB to ~1048 KiB (uncompressed) — checked
+  this is fine rather than assuming: Cloudflare raised the Worker size
+  limit to 64 MiB (uncompressed) across all plans as of 2026-09-04, two
+  days before this shipped, replacing the old 3 MB (free) / 10 MB (paid)
+  compressed-size limits.
+- `worker/lib/certificate.js`: `buildCertificatePdf({ learnerName,
+  courseTitle, completedAt })` — a single landscape A4 page, a
+  brand-orange double border, centered text. Course titles (up to 200
+  chars) and display names (up to 80 chars) are otherwise-unbounded
+  content, so the drawing helper shrinks the font rather than letting a
+  long one overflow the page or collide with the border.
+- `GET /v1/courses/:slug/certificate` (new, `worker/routes/courses.js`)
+  — self-only, gated on the caller's own `enrollments.status =
+  'completed'` row for that course; 403 if enrolled-but-not-completed or
+  never enrolled at all, 404 if the course itself doesn't exist. Always
+  uses the account's real `display_name`, never anonymized — this is a
+  document the owner downloads for themselves, not shown to anyone else,
+  so there's nothing to hide it from. No new migration — reads only
+  existing `enrollments`/`courses`/`users` columns.
+- Frontend: `getCourseCertificateUrl()` (`authClient.ts`) + a plain
+  `<a target="_blank">` link on `/account/courses`' completed enrollment
+  cards, same "let the browser's cookie ride along on a direct
+  navigation" pattern the resource-request file download link already
+  used — no fetch+blob handling needed since there's no JSON to parse.
+- `worker/test/certificate.test.js`, 7 new tests: `buildCertificatePdf`
+  itself produces real, re-parseable PDF bytes (including a
+  pathologically long title/name that doesn't break generation), and
+  the route's full boundary set — unauthenticated, nonexistent course,
+  enrolled-but-active, never-enrolled, and the real success path
+  (200, `Content-Type: application/pdf`, valid re-parseable PDF bytes).
+
+132/132 across the whole suite. `npx tsc --noEmit`, `npx next build`,
+and `wrangler deploy --dry-run` all clean. No migration for this feature
+itself (no schema change) — bundled into the same deploy as the XP
+levels work above it (migration 0037 applied, Worker redeployed with
+`pdf-lib` included, user approved after review) — `/health` confirmed
+OK. Frontend commit message handed to the user as text, not committed
+by me.
+
+## Log certificate downloads (2026-09-06)
+
+Follow-up request, alongside the user separately noticing a new
+registration showed up in Discord but not in the staff panel's Activity
+log — investigated that as a separate question (see AGENTS.md: it's
+existing, deliberate architecture — Activity log is *staff actions
+only* (`staff_audit_log`), not a general site-activity feed — not a bug,
+but flagged back to the user as a real design question worth deciding
+on, not silently left alone or silently "fixed" by guessing what they
+meant).
+
+The certificate-download part was unambiguous, so implemented directly:
+migration `0038_certificate_download_event.sql` adds
+`'certificate_download'` to `auth_events.event_type`'s CHECK constraint
+(same recreate-the-leaf-table pattern 0009/0014 already established —
+`auth_events` has no FK children, so this is safe, unlike the
+CASCADE-child achievements/courses situations elsewhere in this
+migration history). `getCourseCertificateV1` now calls `logAuthEvent`
+right after a successful PDF build — not rate-limited (there's no real
+abuse vector in re-downloading your own certificate), and deliberately
+*not* wired to `logStaffAction`/Discord, matching how every other
+routine self-service action (quiz attempts, resource opens) is already
+logged: a durable, queryable record, not a live alert. Verified it only
+logs on an actual successful download, not a rejected 403 attempt.
+
+`worker/test/certificate.test.js` gained one more test (8 total for
+this file): a successful download leaves exactly one
+`certificate_download` row for that user; a stranger's rejected attempt
+leaves none. 133/133 across the whole suite.
+
+## Signups added to the staff Activity log (2026-09-06)
+
+Follow-up to the registration-visibility question raised above. Asked
+the user directly rather than guessing, and they wanted new signups
+folded into the existing Activity log tab rather than left alone or put
+somewhere new.
+
+The obvious-looking approach — surface `auth_events`' `register_attempt`
+rows — turned out to be wrong on inspection: that event fires on *every*
+registration attempt including a silent duplicate-email no-op
+(`registerV1` logs it before checking whether the email already
+exists), and it's keyed by IP, not a user id, so there's no reliable way
+to get a real name/email back out of it. Used `users.created_at`
+instead — a row only exists there if an account was actually created,
+so it's an unambiguous, real signal with no risk of showing phantom
+attempts.
+
+- `listAuditLogStaffV1` (`worker/routes/staff.js`) now queries both
+  `staff_audit_log` and `users`, tags each row with a `kind`
+  (`"staff_action"` or `"signup"`), merges and re-sorts by timestamp,
+  and returns the newest 200 combined — same shape/limit convention the
+  endpoint already used, just two sources instead of one.
+- Frontend: `AuditLogEntry` (`authClient.ts`) is now a discriminated
+  union on `kind`; `AuditLogSection` (`AdminPanel.tsx`) renders a
+  distinct "New signup" row (display name + email) alongside the
+  existing staff-action rendering.
+- No migration — both source tables already existed, this is a query
+  change, not a schema change.
+- `worker/test/audit-log.test.js`, 2 new tests: non-staff gets 403, and
+  a staff action plus a signup both appear in the merged feed with the
+  right `kind`/fields, sorted newest-first (verified with a deliberately
+  backdated staff-action row so the ordering assertion can't pass by
+  accident).
+
+135/135 across the whole suite. `npx tsc --noEmit`, `npx next build`,
+and `wrangler deploy --dry-run` all clean.

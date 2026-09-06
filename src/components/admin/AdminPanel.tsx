@@ -697,16 +697,28 @@ function AuditLogSection() {
         {entries === undefined && !error && <SkeletonRow count={3} />}
         {entries?.length === 0 && <p className="border-b border-r border-white/10 bg-[#17181B] p-4 text-sm text-[#90939A]">Nothing logged yet.</p>}
         {entries?.map((e) => (
-          <div key={e.id} className="border-b border-r border-white/10 bg-[#17181B] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <span className="text-sm font-medium text-white">{ACTION_LABELS[e.action] ?? e.action}</span>
-                {e.targetLabel && <span className="ml-2 text-xs text-[#90939A]">→ {e.targetLabel}</span>}
+          <div key={`${e.kind}-${e.id}`} className="border-b border-r border-white/10 bg-[#17181B] p-4">
+            {e.kind === 'signup' ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-sm font-medium text-white">New signup</span>
+                  <span className="ml-2 text-xs text-[#90939A]">{e.displayName} · {e.email}</span>
+                </div>
+                <span className="shrink-0 text-xs text-white/40">{new Date(e.createdAt).toLocaleString()}</span>
               </div>
-              <span className="shrink-0 text-xs text-white/40">{new Date(e.createdAt).toLocaleString()}</span>
-            </div>
-            <p className="mt-1 text-xs text-[#90939A]">by {e.actorEmail}</p>
-            {e.detail && <p className="mt-2 text-sm text-[#90939A]">{e.detail}</p>}
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-sm font-medium text-white">{ACTION_LABELS[e.action] ?? e.action}</span>
+                    {e.targetLabel && <span className="ml-2 text-xs text-[#90939A]">→ {e.targetLabel}</span>}
+                  </div>
+                  <span className="shrink-0 text-xs text-white/40">{new Date(e.createdAt).toLocaleString()}</span>
+                </div>
+                <p className="mt-1 text-xs text-[#90939A]">by {e.actorEmail}</p>
+                {e.detail && <p className="mt-2 text-sm text-[#90939A]">{e.detail}</p>}
+              </>
+            )}
           </div>
         ))}
       </div>
