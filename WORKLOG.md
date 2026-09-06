@@ -5257,3 +5257,87 @@ attempts.
 
 135/135 across the whole suite. `npx tsc --noEmit`, `npx next build`,
 and `wrangler deploy --dry-run` all clean.
+
+## Cryptographically signed, publicly verifiable certificates (2026-09-06)
+
+The user noticed the certificate PDF was trivially fakeable — nothing
+tied it to a real completion, so anyone could recreate an
+identical-looking one. Talked through the two real fixes: a
+shared-secret hash checked against a lookup page, or a real digital
+signature checked entirely offline. User picked the signature approach,
+specifically to avoid ever exposing a lookup endpoint, and asked for the
+verification link to be a public page (no login required — the actual
+point of a verifiable certificate is that an outside party, e.g. an
+employer, can check it without an account).
+
+Checked feasibility for real before committing to it, not just assumed:
+- Web Crypto (`crypto.subtle`) is a *built-in* Workers runtime API — no
+  new dependency, no bundle size cost at all (unlike `pdf-lib`, which
+  added ~800 KiB).
+- Confirmed via Cloudflare's own docs/community posts: ECDSA is
+  supported with the same standard Web Crypto names a plain browser
+  uses; Ed25519 is also supported but only under a Workers-specific
+  "NODE-ED25519" algorithm name with private-key import restrictions —
+  picked ECDSA (P-256) specifically so the signing side (this Worker)
+  and verifying side (a browser) need zero platform-specific handling.
+- Re-verified the CPU-budget question this feature already raised once:
+  created a throwaway test account directly in D1 (same disposable-QA
+  technique used once before for achievement testing — never a real
+  session), completed a real course, downloaded its certificate from
+  **live production**, confirmed a normal 200 PDF response with no
+  CPU-limit error, then deleted every trace of the test account. Signing
+  adds ~1ms on top of a request that already ran fine.
+
+**Design**: no certificates table, no lookup. The Worker signs
+`{ n: learnerName, c: courseTitle, d: completedAt }` with an ECDSA
+private key (a new Worker secret, `CERT_SIGNING_PRIVATE_KEY_JWK`,
+generated once via Node's `crypto.webcrypto` and never committed
+anywhere) and embeds the payload + signature directly in a verify URL
+printed on the certificate. `worker/lib/certificateSignature.js`
+deliberately doesn't hardcode a separate public key constant at all —
+it derives the public half from whichever private key is actually
+active (an EC private JWK already contains its own public x/y
+coordinates), so there's no separate value that could ever drift out of
+sync with what's actually signing. A `DEV_FALLBACK_PRIVATE_JWK` (a
+different, separately-generated keypair) covers local dev/tests where
+the real secret isn't configured — same spirit as `ANON_HASH_SECRET`'s
+undefined-in-tests fallback elsewhere in this codebase.
+
+- `GET /v1/certificates/public-key` (new, public, no session) — returns
+  the public JWK, long-cacheable (`max-age=86400`) since it only changes
+  if the signing key itself is ever rotated.
+- `getCourseCertificateV1` now signs the payload and builds the verify
+  URL; `worker/lib/certificate.js`'s `buildCertificatePdf` draws it
+  (plus a cosmetic-only short "Certificate ID," not used for actual
+  verification) wrapped across multiple small lines at the bottom — a
+  realistic payload+signature runs 300-600+ characters, far too long to
+  fit one line even at a tiny font, so `wrapTextLines` hard-wraps by
+  character count.
+- `src/app/verify/page.tsx` + `VerifyResult.tsx` (new, public,
+  `robots: noindex`) — does the *entire* check client-side in the
+  visitor's own browser: fetches only the public key (revealing nothing
+  about any specific certificate), then `crypto.subtle.verify()`s the
+  payload/signature straight out of the URL's own query string. This
+  Worker is never asked anything about a specific certificate at
+  verification time.
+- Verified the cross-boundary encoding for real (not just per-side unit
+  tests): a standalone script signed a payload the way the Worker does
+  and verified it the way the browser page does, in one run — valid
+  signature passes, a one-character tamper to the payload fails, and a
+  realistic long name/title produced a 284-character URL, comfortably
+  within what a clickable PDF link (or, later, a QR code) can carry.
+- `worker/test/certificate-signature.test.js` (6 new tests): sign+verify
+  round trip against the derived public key, a tampered payload fails,
+  a signature from an unrelated keypair fails, the public-key endpoint
+  is unauthenticated and matches what this Worker actually signs with,
+  it's cacheable and never leaks the private key, and `base64UrlEncode`
+  produces clean URL-safe output. `worker/test/certificate.test.js`'s
+  two `buildCertificatePdf` unit tests updated for the new
+  `verifyUrl`/`certificateId` parameters, including one with a
+  realistically long wrapped URL.
+
+141/141 across the whole suite. `npx tsc --noEmit`, `npx next build`,
+and `wrangler deploy --dry-run` all clean. `/verify` added to
+`robots.ts`'s disallow list, same reasoning as `/reset-password`/
+`/verify-email` (single-purpose, query-string-driven, nothing generic
+to index). No new database table or migration.

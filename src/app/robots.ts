@@ -17,7 +17,9 @@ import type { MetadataRoute } from 'next'
 // directly). Listing a path here is itself a common way scanners
 // *discover* "interesting" paths, which would work against the whole
 // point of a decoy; same reasoning sitemap.ts and admin/page.tsx already
-// documented.
+// documented. /verify (certificate verification) joins the same
+// utility-flow group — its content is entirely a per-certificate query
+// string, nothing generic worth indexing.
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
@@ -32,6 +34,7 @@ export default function robots(): MetadataRoute.Robots {
         '/reset-password',
         '/verify-email',
         '/forgot-password',
+        '/verify',
         '/api/',
       ],
     },

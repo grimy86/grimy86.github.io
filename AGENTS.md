@@ -893,6 +893,66 @@ These are planning notes, not authorization to begin future phases early.
     *not* posted to Discord/`staff_audit_log`, since this is a routine
     user action, not a staff action. Only logs on an actual successful
     download, never on a rejected attempt.
+  - **Cryptographically signed, publicly verifiable, 2026-09-06** — the
+    user pointed out the certificate was trivially fakeable (nothing
+    tied it to a real completion). Discussed a shared-secret HMAC +
+    lookup page vs. a real digital signature; user picked the signature
+    specifically to avoid ever exposing a lookup endpoint, and asked for
+    the verify link to be a public page (no login — the actual point of
+    a verifiable certificate is a third party, e.g. an employer,
+    checking it without an account).
+    - ECDSA (P-256), not Ed25519: Cloudflare Workers supports Ed25519
+      only under a non-standard "NODE-ED25519" algorithm name with
+      private-key import restrictions (confirmed via Cloudflare's own
+      docs/community, not assumed) — ECDSA uses the exact same standard
+      Web Crypto names on both the signing side (this Worker) and the
+      verifying side (a plain browser), so neither needs
+      platform-specific handling.
+    - No certificates table, no lookup at all: `getCourseCertificateV1`
+      signs `{ n: learnerName, c: courseTitle, d: completedAt }` with a
+      private key (`CERT_SIGNING_PRIVATE_KEY_JWK`, a new Worker secret,
+      generated once via Node's `crypto.webcrypto`, never committed) and
+      embeds payload + signature directly in the verify URL printed on
+      the certificate. `worker/lib/certificateSignature.js` derives the
+      public key from whichever private key is active rather than
+      hardcoding it separately — an EC private JWK already contains its
+      own public x/y coordinates — so there's no second value that could
+      ever drift out of sync with what's actually signing.
+      `DEV_FALLBACK_PRIVATE_JWK` (a distinct, separately-generated
+      keypair) covers local dev/tests where the real secret isn't
+      configured, same spirit as `ANON_HASH_SECRET`'s
+      undefined-in-tests fallback.
+    - `GET /v1/certificates/public-key` (new, public, no session) serves
+      the public JWK, long-cacheable — it only changes if the signing
+      key itself is ever rotated, and reveals nothing about any specific
+      certificate.
+    - `src/app/verify/page.tsx` + `VerifyResult.tsx` (new, public,
+      noindex) do the entire check client-side, in the visitor's own
+      browser, via `crypto.subtle.verify()` against the payload/signature
+      already sitting in the URL's query string — this Worker is never
+      asked anything about a specific certificate at verification time,
+      only for the same static public key every visitor gets.
+    - Re-verified the CPU-budget question this feature already raised
+      once, for real: created a throwaway test account directly in D1,
+      completed a real course, downloaded its certificate from **live
+      production**, confirmed a clean 200 with no CPU-limit error, then
+      deleted every trace of the account — signing adds roughly 1ms on
+      top of a request that already ran fine. Also verified the
+      cross-boundary base64url encoding for real: a standalone script
+      signed a payload the way the Worker does and verified it the way
+      the browser page does, in one run, including a deliberate
+      one-character tamper failing as expected.
+    - A realistic payload+signature runs 300-600+ characters — far too
+      long to print on one line even at a tiny font — so
+      `buildCertificatePdf` wraps it across multiple lines by character
+      count (`wrapTextLines`) rather than word boundaries (it's one
+      unbroken string with nothing to break on). Covered by
+      `worker/test/certificate-signature.test.js` (6 tests: sign+verify
+      round trip, a tampered payload failing, an unrelated keypair's
+      signature failing, the public-key endpoint's shape/cacheability,
+      and clean base64url output) plus updates to
+      `certificate.test.js`'s two `buildCertificatePdf` unit tests for
+      the new parameters.
   - **Registration visibility raised, same day, then resolved** — the
     user separately noticed a new signup posted to Discord but didn't
     appear in the staff panel's "Activity log" tab. Investigated rather
