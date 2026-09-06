@@ -34,7 +34,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (!sessionLoading && user) {
-      router.replace('/account')
+      router.replace('/account/courses')
     }
   }, [sessionLoading, user, router])
 

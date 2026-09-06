@@ -28,8 +28,12 @@ import { SectionHeading, inputClass, rowInputClass, buttonClass, blockButtonClas
 import Eyebrow from '@/components/Eyebrow'
 import { useToast } from '@/components/ToastProvider'
 import { Skeleton, SkeletonRow } from '@/components/Skeleton'
+import RoleRequestsPanel from '@/components/admin/RoleRequestsPanel'
+import ResourceRequestsPanel from '@/components/admin/ResourceRequestsPanel'
+import CourseRequestsPanel from '@/components/admin/CourseRequestsPanel'
 
-type Tab = 'users' | 'ips' | 'honeypot' | 'log'
+type Tab = 'users' | 'ips' | 'honeypot' | 'log' | 'role-requests' | 'resource-requests' | 'course-requests'
+const TAB_IDS: Tab[] = ['users', 'ips', 'honeypot', 'role-requests', 'resource-requests', 'course-requests', 'log']
 
 const ACTION_LABELS: Record<string, string> = {
   role_change: 'Role change',
@@ -51,15 +55,21 @@ const ACTION_LABELS: Record<string, string> = {
 
 const ROLES: Role[] = ['student', 'contributor', 'instructor', 'staff']
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'users', label: 'Users' },
-  { id: 'ips', label: 'Blocked IPs' },
-  { id: 'honeypot', label: 'Honeypot' },
-  { id: 'log', label: 'Activity log' },
-]
+// Reads ?tab= without next/navigation's useSearchParams, which forces a
+// Suspense boundary on the whole route — this page is already client-only
+// and gated behind a session check, so a plain URL read is enough.
+function initialTabFromUrl(): Tab {
+  if (typeof window === 'undefined') return 'users'
+  const tab = new URLSearchParams(window.location.search).get('tab')
+  return TAB_IDS.includes(tab as Tab) ? (tab as Tab) : 'users'
+}
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState<Tab>('users')
+  // Lets CourseReviewPanel's "back to list" and breadcrumb link land back
+  // on the course-requests tab (?tab=course-requests) instead of always
+  // resetting to Users, now that course review no longer has its own route
+  // to redirect back to.
+  const [tab, setTab] = useState<Tab>(initialTabFromUrl)
 
   // Each of these three queries is also run independently inside its own
   // tab's section component below — same query keys, so React Query
@@ -76,6 +86,19 @@ export default function AdminPanel() {
   const pendingTotal = pendingCounts ? pendingCounts.roleRequests + pendingCounts.resourceRequests + pendingCounts.courseRequests : null
   const honeypotCount = honeypotHits?.hits.length ?? null
 
+  // Approvals used to live on their own /account/approvals nav item —
+  // folded in here as tabs (with the same pending counts as badges) so
+  // the account sidebar has one staff entry instead of two.
+  const TABS: { id: Tab; label: string; badge?: number | null }[] = [
+    { id: 'users', label: 'Users' },
+    { id: 'ips', label: 'Blocked IPs' },
+    { id: 'honeypot', label: 'Honeypot' },
+    { id: 'role-requests', label: 'Role requests', badge: pendingCounts?.roleRequests },
+    { id: 'resource-requests', label: 'Resource requests', badge: pendingCounts?.resourceRequests },
+    { id: 'course-requests', label: 'Course requests', badge: pendingCounts?.courseRequests },
+    { id: 'log', label: 'Activity log' },
+  ]
+
   return (
     <div>
       <Eyebrow>Staff</Eyebrow>
@@ -89,17 +112,22 @@ export default function AdminPanel() {
         <StatTile label="Honeypot hits" value={honeypotCount} accent={Boolean(honeypotCount)} />
       </div>
 
-      <div className="mt-10 flex gap-2 border-b border-white/10">
+      <div className="mt-10 flex flex-wrap gap-2 border-b border-white/10">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`-mb-px border-b-2 px-1 py-3 text-xs font-medium uppercase tracking-[0.1em] transition-colors ${
+            className={`-mb-px flex items-center gap-1.5 border-b-2 px-1 py-3 text-xs font-medium uppercase tracking-[0.1em] transition-colors ${
               tab === t.id ? 'border-[#FF7A33] text-white' : 'border-transparent text-[#90939A] hover:text-white'
             }`}
           >
             {t.label}
+            {Boolean(t.badge) && (
+              <span className="flex h-4 min-w-4 items-center justify-center bg-[#FF7A33] px-1 text-[10px] font-bold normal-case tracking-normal text-[#0D0D0D]">
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -108,6 +136,9 @@ export default function AdminPanel() {
         {tab === 'users' && <UsersSection />}
         {tab === 'ips' && <BlockedIpsSection />}
         {tab === 'honeypot' && <HoneypotSection />}
+        {tab === 'role-requests' && <RoleRequestsPanel />}
+        {tab === 'resource-requests' && <ResourceRequestsPanel />}
+        {tab === 'course-requests' && <CourseRequestsPanel />}
         {tab === 'log' && <AuditLogSection />}
       </div>
     </div>

@@ -29,12 +29,12 @@ export default function AccountShell({ children }: { children: React.ReactNode }
   const router = useRouter()
   const { user, loading, refresh } = useSession()
   const toast = useToast()
-  // Same ['staffPendingCounts'] key as /account/approvals — this sidebar
-  // badge and that page's own counts now share one cached fetch instead
-  // of each independently hitting the endpoint. refetchInterval keeps it
-  // polling in the background for as long as a staff member has any
-  // /account page open, which is what makes the toasts below live rather
-  // than only updating on the next manual navigation.
+  // Same ['staffPendingCounts'] key as AdminPanel's approvals tabs — this
+  // sidebar badge and those tabs' own counts now share one cached fetch
+  // instead of each independently hitting the endpoint. refetchInterval
+  // keeps it polling in the background for as long as a staff member has
+  // any /account page open, which is what makes the toasts below live
+  // rather than only updating on the next manual navigation.
   const { data: pendingCounts } = useQuery({
     queryKey: ['staffPendingCounts'],
     queryFn: () => unwrapResult(getStaffPendingCounts()),
@@ -79,15 +79,12 @@ export default function AccountShell({ children }: { children: React.ReactNode }
 
   const items: NavItem[] = user
     ? [
-        { href: '/account', label: 'Overview' },
         { href: `/u/${user.id}`, label: 'Profile' },
         { href: '/account/security', label: 'Security' },
         { href: '/account/courses', label: 'Courses' },
         { href: '/account/contribute', label: 'Contribute' },
-        ...(user.role === 'instructor' || user.role === 'staff' ? [{ href: '/account/build', label: 'Build' }] : []),
-        ...(user.role === 'staff' ? [{ href: '/account/staff', label: 'Staff' }] : []),
         ...(user.role === 'staff'
-          ? [{ href: '/account/approvals', label: 'Approvals', badge: pendingTotal > 0 ? pendingTotal : null }]
+          ? [{ href: '/account/staff', label: 'Staff', badge: pendingTotal > 0 ? pendingTotal : null }]
           : []),
       ]
     : []
@@ -110,7 +107,12 @@ export default function AccountShell({ children }: { children: React.ReactNode }
           ) : (
             <div className="flex flex-row flex-wrap gap-1 md:flex-col md:flex-nowrap">
               {items.map((item) => {
-                const active = item.href === '/account' ? pathname === item.href : pathname.startsWith(item.href)
+                // The course editor (/account/build/[id]) and group
+                // manager (/account/build/groups) stayed their own routes
+                // when the old standalone /account/build landing page
+                // folded into Contribute — they're reached from there, so
+                // Contribute should still read as active while on either.
+                const active = pathname.startsWith(item.href) || (item.href === '/account/contribute' && pathname.startsWith('/account/build'))
                 return (
                   <Link
                     key={item.href}

@@ -32,13 +32,13 @@ export default function LoginPage() {
     },
     onSuccess: async () => {
       await refresh()
-      router.push('/account')
+      router.push('/account/courses')
     },
   })
 
   useEffect(() => {
     if (!sessionLoading && user) {
-      router.replace('/account')
+      router.replace('/account/courses')
     }
   }, [sessionLoading, user, router])
 

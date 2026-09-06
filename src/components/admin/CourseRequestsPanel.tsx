@@ -29,7 +29,7 @@ export default function CourseRequestsPanel() {
         {courses?.map((c) => (
           <Link
             key={c.id}
-            href={`/account/approvals/course-requests/${c.id}`}
+            href={`/account/staff/course-requests/${c.id}`}
             className="block border-b border-r border-white/10 bg-[#17181B] p-4 transition-colors hover:bg-white/[0.03]"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">

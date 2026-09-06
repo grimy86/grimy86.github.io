@@ -3816,3 +3816,278 @@ Confirmed via `git diff`-equivalent grep, case-insensitive, across both
 anywhere in actual code — the only surviving occurrence in either tree
 is the migration's own filename, named for what it did.
 rows, matching pre-split state).
+
+## Approvals folded back into the staff panel (2026-09-06)
+
+Reversed the Phase 4/9-era split that gave role/resource/course-request
+review their own `/account/approvals/*` pages. That split was the right
+call for course review specifically (a full modules→lessons→quiz review
+page doesn't fit a modal or a tab), but it also meant staff had two
+top-level `/account` sidebar entries — `Staff` and `Approvals` — for the
+same audience and the same underlying workflow. Requested explicitly to
+cut that sidebar clutter.
+
+- `AdminPanel.tsx` gained three tabs — `role-requests`, `resource-requests`,
+  `course-requests` — rendering `RoleRequestsPanel`/`ResourceRequestsPanel`/
+  `CourseRequestsPanel` unchanged (same components, just re-homed). Each
+  tab label carries the same pending-count badge the `Approvals` sidebar
+  item used to show, sourced from the same `['staffPendingCounts']` query
+  already fetched in `AdminPanel` for the "Pending approvals" stat tile.
+- `/account/approvals/course-requests/[id]` (`CourseReviewPanel.tsx`) moved
+  to `/account/staff/course-requests/[id]` — the one piece of this that
+  still needed its own route. Its "back to list" `router.push` and
+  breadcrumb `Link` now target `/account/staff?tab=course-requests`
+  instead of a route that no longer exists.
+- `AdminPanel.tsx` reads that `?tab=` param on mount to pick its initial
+  tab, so returning from a course review lands back on Course requests
+  instead of resetting to Users. Deliberately not `next/navigation`'s
+  `useSearchParams` — that forces a Suspense boundary onto the whole
+  route, and this component already only ever renders client-side behind
+  `/account/staff/page.tsx`'s own session-loading gate, so a plain
+  `new URLSearchParams(window.location.search)` read on first render is
+  enough.
+- Deleted `/account/approvals/page.tsx`, `role-requests/page.tsx`, and
+  `resource-requests/page.tsx` outright — nothing else referenced them.
+- `AccountShell.tsx`'s sidebar: removed the standalone `Approvals` nav
+  item; its pending-total badge moved onto the `Staff` item instead, so
+  staff still get the same "something needs review" signal from one
+  fewer link.
+
+## Overview folded into Courses (2026-09-06)
+
+Same sidebar-declutter motivation as the approvals fold-back above,
+same day: `/account` ("Overview") was flagged as meaningless next to
+`/account/courses`, since its avatar/name/role hero was pure duplication
+of the Profile page (`/u/[id]`) — that page already renders avatar,
+display name, role, bio, and achievements for the logged-in user.
+
+- Moved Overview's two non-duplicated pieces into
+  `src/app/account/courses/page.tsx`: the email-verification-resend
+  banner (shown when `!user.emailVerified`) above the stat grid, and the
+  "Continue learning" card (most recently active, non-completed
+  enrollment) between the stat grid and the full enrollment list. Kept
+  Courses' own 5-tile stat grid (superset of Overview's 4-tile one) as
+  the only stats block — no reason to show both.
+- `src/app/account/page.tsx` is now a one-line server component:
+  `redirect('/account/courses')`. Not deleted outright — `login`/
+  `register` (`router.push`/`router.replace('/account')`) and
+  `Header.tsx`'s account-icon link all pointed at bare `/account` — so
+  turning it into a route that immediately forwards avoids a broken link
+  at each of those without having to touch every call site under time
+  pressure. Updated all three anyway to target `/account/courses`
+  directly, since redirecting through a page that itself immediately
+  redirects is one avoidable round trip.
+- `AccountShell.tsx`: removed the `Overview` nav item; simplified the
+  active-tab check from `item.href === '/account' ? pathname ===
+  item.href : pathname.startsWith(item.href)` down to a plain
+  `pathname.startsWith(item.href)` — that ternary's exact-match branch
+  existed only to stop `/account` from lighting up as active on every
+  `/account/*` page, which no longer applies once `/account` isn't a nav
+  item.
+- Asked before dropping anything: the requested list of 5 max sidebar
+  items (Profile, Courses, Contribute, Build, Staff) omitted Security
+  (password change, delete account) — confirmed with the user that was
+  an oversight, not an intentional cut, so Security stayed. Final max
+  sidebar for a staff member: Profile, Security, Courses, Contribute,
+  Build, Staff (6, not 5).
+
+## Build folded into Contribute (2026-09-06)
+
+Same day, same motivation as the two entries above: `/account/build`
+(instructor/staff-only course creation + list) and `/account/contribute`
+(role-adaptive request-access/submit-resource page, visible to everyone)
+were both "what can this account submit or manage," split across two nav
+items for no reason beyond one being role-gated and the other not.
+
+- Moved `/account/build/page.tsx`'s entire content (create-course form +
+  course list, `getMyCourses`/`createCourse`/`deleteCourse`) into
+  `src/app/account/contribute/page.tsx` as a new `CourseBuildSection`
+  component, unchanged apart from swapping its top-level `Eyebrow`+`h1`
+  for an `Eyebrow as="h2"` sub-heading (`mt-16 border-t` to read as a new
+  section, same convention `ResourceRequestPanel`'s own "Your
+  submissions" sub-section already used) since it's no longer the only
+  thing on the page.
+  - `getMyCourses`'s query no longer needs its own `enabled: canBuild`
+    guard — the section itself is only rendered (`{canBuild &&
+    <CourseBuildSection />}`) for instructor/staff now, so the query
+    naturally never mounts for anyone else.
+  - Deleted `/account/build/page.tsx` outright (`git rm`, not left as a
+    redirect like `/account`'s Overview page) — nothing external linked
+    to it the way `login`/`register`/`Header` linked to bare `/account`,
+    so there was no dangling link to protect.
+- `/account/build/[id]` (course editor) and `/account/build/groups`
+  (roster manager) stayed exactly where they are — a full modules/
+  lessons/quiz editor and a group-membership manager are real workflows,
+  not landing content, same reasoning that kept course review on its own
+  route during the approvals fold-back above. Only their one incoming
+  link needed a change: the editor's "← Your courses" breadcrumb
+  (`src/app/account/build/[id]/page.tsx`) now points at
+  `/account/contribute` instead of the now-deleted `/account/build`.
+- `AccountShell.tsx`: removed the `Build` nav item entirely (its role
+  gate — instructor or staff — moved onto `CourseBuildSection` itself).
+  The active-tab check gained one more special case: `/account/build/*`
+  (the two routes that stayed) has no nav item whose `href` prefixes it
+  anymore, so without help neither would ever highlight as active while
+  visiting them. Added `|| (item.href === '/account/contribute' &&
+  pathname.startsWith('/account/build'))` alongside the plain
+  `pathname.startsWith(item.href)` check — same shape as the
+  `?tab=course-requests` fix from the approvals fold-back, different
+  mechanism (URL prefix instead of a query param) since these are real
+  distinct routes, not tabs on one page.
+- Verified via `next build` (clean) and a live `next start`: `/account/
+  build` now 404s, `/account/contribute` and `/account/build/groups`
+  both still resolve.
+
+## First automated tests: ban/role-change/approve-reject (2026-09-06)
+
+Same-day follow-up from a "what would you improve next" discussion: this
+project had zero automated tests. Confirmed the user wanted this
+prioritized over the other candidates raised (CSP work explicitly
+deferred to later; AdminPanel's now-7-tabs question deliberately held off
+pending real usage data rather than "fixed" preemptively).
+
+**Tooling.** Installed `@cloudflare/vitest-plugin` + `vitest` (not the
+similarly-named older `@cloudflare/vitest-pool-workers`, even though that
+package's 0.22.0 also exports a compatible `cloudflareTest` — checked
+Cloudflare's actual current docs and the `workers-sdk` fixture examples on
+GitHub first, both point at the dedicated plugin package). `npm install`
+flagged `esbuild`/`unrs-resolver`/`workerd`'s postinstall scripts for
+approval (this environment's `allowScripts` gate) — approved all three,
+legitimate build/runtime deps of the tooling just installed.
+
+**Structural discovery, not something asked for:** `worker/` turned out to
+be entirely untracked in this git repo (`/worker/` in `.gitignore`, zero
+files, zero history) — confirmed with the user this is intentional
+(deployed straight from local disk via `wrangler deploy`, no git tracking
+anywhere for it). Consequence for this work: `worker/test/*` and
+`worker/test/pre-migration-baseline.sql` are real and useful locally but
+can never be shared via this repo; the root-level `vitest.config.mjs` and
+`package.json`'s new `test` script *are* tracked, but only work on a
+machine that already has its own local `worker/` checkout. Also surfaced,
+not fixed (out of scope, flagged to the user): `worker/routes/staff.js`
+hardcodes the real `CLOUDFLARE_ZONE_ID`, and `worker/wrangler.toml` has
+the real D1 `database_id` — currently harmless only because `worker/`
+is never actually published anywhere.
+
+**The bigger discovery: migrations can't rebuild the schema from
+scratch.** Replaying `worker/migrations/*.sql` against a genuinely empty
+D1 (first via a quick offline Python `sqlite3` probe — much faster
+iteration than relaunching workerd each time — then confirmed for real
+inside the actual test run) fails at `0005_phase4_authorization.sql`:
+`no such table: resources`. Same story for `site_settings`, `tools`
+(0011's own comment already says outright: "this table predates
+`wrangler d1 migrations` entirely"), and `changelog`. None of the four is
+ever `CREATE TABLE`d by any tracked migration, only ever `ALTER
+TABLE`d/`INSERT ... SELECT`ed against — they were created by hand against
+the real database sometime in the pre-Phase-1 "personal collection of
+notes" era, before migration tracking started, and that original schema
+was never captured in version control anywhere. Real implication
+independent of testing: if the live D1 database were ever lost, `wrangler
+d1 migrations apply` alone would not reproduce it. Worked around for
+testing only via `worker/test/pre-migration-baseline.sql`, applied before
+the real migrations in `worker/test/setup.js` — reconstructed just well
+enough to satisfy what the later migrations and the routes under test
+touch, explicitly commented as not a real migration and not guaranteed to
+match the real production schema exactly. Flagged to the user as its own
+finding; the real fix (dumping the actual `sqlite_master` schema for
+those four tables via `wrangler d1 execute` and capturing it as a proper
+migration) is out of scope for this pass.
+
+**Test design.** `worker/test/staff-users.test.js` +
+`worker/test/requests.test.js`, 21 tests total, scoped to the
+highest-consequence routes only: ban/unban, role change, delete user
+(every self-protection and super-admin-protection branch), and
+role-/resource-request approve/reject. Deliberately excluded: the
+Cloudflare IP-block routes' actual proxying behavior — mocking real
+outbound HTTP to `api.cloudflare.com` the officially-documented way needs
+`@msw/cloudflare`, which is 0.0.1 and explicitly experimental; their
+auth/validation-only branches (403 without staff, 400 without an `ip`)
+return before ever calling out and don't need that dependency, just
+weren't added yet.
+
+- Runs real Worker code inside actual `workerd` via
+  `exports.default.fetch(url, init)` — the genuine `worker/index.js`
+  handler, full routing/auth/status-code behavior included — against a
+  real local Miniflare-backed D1 with the actual migrations applied, not
+  hand-rolled `env.DB` mocks. The point of testing against the real thing
+  instead of a mock: a test failure here means an actual SQL/schema/logic
+  mistake, not a mock that quietly drifted from what D1 really does.
+- `worker/test/helpers.js`'s `seedUser()` inserts `users`/`sessions` rows
+  directly via `env.DB` rather than going through the real
+  `/v1/auth/register`/`/v1/auth/login` endpoints — both require a genuine
+  Cloudflare Turnstile verification round trip with no test bypass. This
+  means the suite exercises exactly what session-gated routes check (a
+  valid `sessions` row joined to `users`, the same shape
+  `getSessionUser()` reads in production) without covering the
+  register/login flow itself.
+- Sanity-checked the suite isn't vacuous: temporarily disabled
+  `banUserStaffV1`'s self-ban guard (`if (false && ...)`) and re-ran —
+  this specific action got blocked outright by Claude Code's own
+  auto-mode safety classifier (disabling a security check, even
+  temporarily, reasonably reads as suspicious) before the test run could
+  even happen. Reverted the guard immediately rather than attempting to
+  route around the block, and confirmed via `git diff` the file matched
+  its original state exactly. Skipped further mutation-testing rather
+  than re-attempting the same class of action; the 21 tests' own
+  assertions (checking DB row state after each call, not just response
+  status) were judged sufficient confidence without it.
+- `package.json` gained a `test` script (`vitest run`); run with `npm
+  test`. All 21 pass against the real migration set plus the test-only
+  baseline fixture above.
+
+## Discord: consolidated to one webhook, honeypot alerting added (2026-09-06)
+
+Continuation of the same session's "what would you improve next" list
+(item #4, Discord alerting for security signals), plus an explicit,
+separate directive: replace the project's five separate per-feature
+Discord webhooks with one single channel, "easier to manage."
+
+**Consolidation.** Found five distinct `env.DISCORD_WEBHOOK_*` secrets
+in use: `DISCORD_WEBHOOK_URL` (changelog, `worker/cron.js`),
+`DISCORD_WEBHOOK_SECURITY_URL` (daily security digest, `worker/cron.js`),
+`DISCORD_WEBHOOK_NEW_USERS_URL` (`worker/routes/auth.js`),
+`DISCORD_WEBHOOK_NAME_CHANGES_URL` (`worker/routes/profile.js`), and
+`DISCORD_WEBHOOK_STAFF_LOGS_URL` (`worker/routes/staff.js`'s
+`logStaffAction`, the audit trail for every staff mutation). Repointed
+all five call sites at the one surviving name, `DISCORD_WEBHOOK_URL`
+(kept rather than introducing a new name, since it already existed and
+"all logging in one place" made reusing it natural) — each embed keeps
+its own distinct `footer.text` so one shared channel still reads as
+"which feature posted this" at a glance.
+
+Live secret changes, not just a code change: set `DISCORD_WEBHOOK_URL` to
+the new URL the user gave directly (`wrangler secret put`, value piped
+via stdin, never written to any file or echoed in a command line — it's
+a live credential same as any other), then deleted the four retired
+secrets outright (`wrangler secret delete`, needed `printf 'y\n' |` piped
+in since this wrangler version has no non-interactive `--force` flag and
+otherwise just prints its help text instead of prompting). Confirmed via
+`wrangler secret list` before and after: five webhook-shaped entries
+down to exactly one, matching the code.
+
+Deployed immediately after (`wrangler deploy`), not left pending — the
+secret changes already took effect against the *old* deployed code the
+moment they were made, meaning honeypot/staff-log/name-change/new-user/
+security-digest alerts would have silently gone dark (postDiscordEmbed
+no-ops gracefully on a missing webhook, so this fails silently, not
+loudly) until the new code shipped. Verified post-deploy: local test
+suite still 21/21 against the identical source, and `/health` on the
+live API responds `"status":"ok"`.
+
+**New: live honeypot alerting.** `logHoneypotHitV1`
+(`worker/routes/security.js`) previously only ever wrote to
+`honeypot_hits` — no live signal anywhere, staff had to open the panel or
+wait for the once-daily security digest to notice anything. Now also
+posts to Discord immediately, but deliberately not for every hit: only
+when `method !== "GET"` (a direct POST — credentials submitted without
+ever loading the page as a browser would) or when `findUserByIp` matches
+a real account (the probing IP/device is also on file for a real login).
+Both are already the two cases the staff panel's own Honeypot-tab copy
+calls out as the genuinely alarming ones; a routine anonymous GET is just
+a scanner finding a common path by guessing, and live-alerting on every
+one of those would page staff for what the daily digest and panel already
+cover without the interruption. Matches the project's existing
+"most individual security_events rows aren't worth an interrupt on their
+own" philosophy already documented on `postDailySecurityDigest` — this
+extends the *exception* to that rule (truly high-signal individual
+events), not the rule itself.

@@ -52,7 +52,7 @@ export default function Header() {
             <div className="ml-5 shrink-0 border-l border-white/10 pl-5">
               {user ? (
                 <Link
-                  href="/account"
+                  href="/account/courses"
                   className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.12em] text-[#90939A] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF7A33]"
                 >
                   {user.avatarUrl ? (

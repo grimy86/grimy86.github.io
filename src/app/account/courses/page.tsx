@@ -10,16 +10,25 @@ import { Skeleton, SkeletonStatTile } from '@/components/Skeleton'
 import {
   getMyProgress,
   getMyStatistics,
+  resendVerification,
   unenrollCourse,
   unwrapResult,
   type MyEnrollment,
 } from '@/lib/authClient'
 import Eyebrow from '@/components/Eyebrow'
 
+// The former standalone /account "Overview" page folded in here — its
+// avatar/name/role greeting was pure duplication of the Profile page
+// (/u/[id], which already shows all three plus bio and achievements), but
+// its email-verification banner and "continue learning" shortcut weren't
+// shown anywhere else, so those moved in rather than being dropped. This
+// is now what /account itself redirects to (see account/page.tsx) and
+// what Header's account link points at directly.
 export default function AccountCoursesPage() {
   const router = useRouter()
   const { user, loading: sessionLoading } = useSession()
 
+  const resendMutation = useMutation({ mutationFn: () => unwrapResult(resendVerification()) })
   const progressQuery = useQuery({
     queryKey: ['progress'],
     queryFn: () => unwrapResult(getMyProgress()),
@@ -33,6 +42,13 @@ export default function AccountCoursesPage() {
   })
   const enrollments = progressQuery.data?.enrollments ?? null
   const error = progressQuery.error?.message ?? null
+  // Surfaced above the full list as a shortcut back to whatever's
+  // actively in progress — the most recently touched active enrollment,
+  // falling back to the first one if none carry a completedAt/enrolledAt
+  // ordering worth relying on client-side.
+  const continuing = progressQuery.data
+    ? progressQuery.data.enrollments.find((e) => e.status !== 'completed') ?? progressQuery.data.enrollments[0] ?? null
+    : null
 
   useEffect(() => {
     if (!sessionLoading && !user) {
@@ -54,6 +70,24 @@ export default function AccountCoursesPage() {
       <Eyebrow>Learning</Eyebrow>
       <h1 className="mt-2 text-4xl font-bold tracking-[-0.05em] text-white">Enrolled courses</h1>
 
+      {!user.emailVerified && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border border-white/10 bg-[#17181B] px-4 py-3 text-xs text-[#90939A] animate-fade-in-up motion-reduce:animate-none">
+          <span>Your email isn&apos;t verified.</span>
+          {resendMutation.isSuccess ? (
+            <span className="text-[#3FB950]">Sent — check your email.</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => resendMutation.mutate()}
+              disabled={resendMutation.isPending}
+              className="text-white/70 underline underline-offset-2 transition-colors hover:text-white disabled:opacity-50"
+            >
+              {resendMutation.isPending ? 'Sending…' : 'Resend verification email'}
+            </button>
+          )}
+        </div>
+      )}
+
       {error && <p className="mt-4 text-sm text-[#F85149] animate-fade-in-up motion-reduce:animate-none">{error}</p>}
 
       <div className="mt-8 grid grid-cols-2 gap-px border border-white/10 bg-white/10 sm:grid-cols-5">
@@ -73,7 +107,30 @@ export default function AccountCoursesPage() {
         )}
       </div>
 
+      {continuing && (
+        <div className="mt-8">
+          <Eyebrow className="mb-3">Continue learning</Eyebrow>
+          <Link
+            href={`/courses/${continuing.courseSlug}`}
+            className="block max-w-md border border-white/10 bg-[#17181B] p-5 transition-colors hover:bg-[#151515]"
+          >
+            <h2 className="text-lg font-semibold text-white">{continuing.courseTitle}</h2>
+            <div className="mt-3 flex items-center gap-3">
+              <div className="h-1.5 flex-1 max-w-40 bg-white/10">
+                <div
+                  className="h-full bg-[#FF7A33]"
+                  style={{ width: `${continuing.totalLessons > 0 ? Math.round((continuing.completedLessons / continuing.totalLessons) * 100) : 0}%` }}
+                />
+              </div>
+              <span className="text-xs text-[#90939A]">{continuing.completedLessons}/{continuing.totalLessons}</span>
+            </div>
+            <p className="mt-3 text-xs text-white/40">Resume →</p>
+          </Link>
+        </div>
+      )}
+
       <div className="mt-10 flex flex-col gap-3">
+        <Eyebrow>All enrollments</Eyebrow>
         {!enrollments && !error && (
           <>
             <Skeleton className="h-24 border border-white/10" />

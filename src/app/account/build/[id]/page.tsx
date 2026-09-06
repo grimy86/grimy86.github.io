@@ -135,7 +135,7 @@ export default function InstructorCourseBuilderPage({ params }: { params: Promis
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
         <div>
-          <Link href="/account/build" className="text-xs uppercase tracking-[0.12em] text-white/40 transition-colors hover:text-white">
+          <Link href="/account/contribute" className="text-xs uppercase tracking-[0.12em] text-white/40 transition-colors hover:text-white">
             ← Your courses
           </Link>
           <div className="mt-2 flex flex-wrap items-center gap-3">

@@ -27,12 +27,13 @@ actions, the interactive quiz UI, and progress surfacing via
 `/account/courses` — plus a full instructor course-authoring pipeline
 (browser-based course builder, admin review before publishing) that
 superseded the original test-seed content. Course review, publish, and
-removal now live at `/account/approvals/course-requests`, split out of
-`/account/staff` along with role- and resource-request review — see "Data and API
-direction" below for the concrete design, and its "Phase 7 (learning
-system UI), concrete decisions so far" entry for how the two
-`postgresql`/`networks` proof-of-pipeline seed courses were later
-replaced with real, fully authored curriculum.
+removal, along with role- and resource-request review, live as tabs on
+`/account/staff` — see "Data and API direction" below for the concrete
+design, its "Security and roles" entry for why that review UI moved back
+onto `/account/staff` after a stint as standalone `/account/approvals/*`
+pages, and "Phase 7 (learning system UI), concrete decisions so far" for
+how the two `postgresql`/`networks` proof-of-pipeline seed courses were
+later replaced with real, fully authored curriculum.
 
 ## Current stack
 
@@ -40,6 +41,83 @@ replaced with real, fully authored curriculum.
 - Backend/API (planned/current architecture): Cloudflare Workers API and
   Cloudflare D1 (SQLite)
 - Delivery: GitHub push → GitHub Actions → Vercel build/deploy → Cloudflare domain
+- `worker/` is deliberately untracked (`/worker/` in `.gitignore`) —
+  confirmed with the user (2026-09-06) that it's deployed straight from
+  local disk via `wrangler deploy`, no git history anywhere, not this
+  repo or a separate one. Two real, currently-harmless-only-because-of-
+  that consequences worth remembering: `worker/routes/staff.js` hardcodes
+  the real Cloudflare zone ID (`CLOUDFLARE_ZONE_ID`) and
+  `worker/wrangler.toml` has the real D1 `database_id` — both fine only
+  because neither file is ever actually published; and the root-level
+  `vitest.config.mjs`/`package.json` `test` script (see "Automated
+  testing" below) *are* tracked here but reference paths under `worker/`,
+  so `npm test` only works on a machine that already has that local
+  `worker/` checkout — a fresh clone of this repo alone can't run it.
+
+## Automated testing
+
+Added 2026-09-06 — until then this project had zero automated tests
+(confirmed: no test script, no test files, `npm audit` clean but that's
+dependency scanning, not regression coverage). Scoped deliberately narrow
+rather than attempting broad coverage: `worker/test/staff-users.test.js`
+and `worker/test/requests.test.js` cover the highest-consequence,
+hardest-to-undo Worker routes — ban/unban, role change, delete user
+(including every self-protection and super-admin-protection check),
+and role-/resource-request approve/reject — the ones where a bug means
+banning the wrong account or promoting the wrong user, not a cosmetic
+regression. Explicitly out of scope for this first pass: the Cloudflare
+IP-block routes' actual proxying behavior (would need mocking real
+outbound HTTP to `api.cloudflare.com`, e.g. via `@msw/cloudflare`, which
+was 0.0.1 and experimental at the time — their auth/validation-only paths
+that return before ever calling out are still easy to add later without
+that dependency), and the AdminPanel tab-count question from the same
+conversation (deliberately held off pending real usage data, not a
+testing gap).
+
+- Runner: `@cloudflare/vitest-plugin` (the current package — the
+  similarly-named older `@cloudflare/vitest-pool-workers` also still
+  exports a compatible `cloudflareTest`, but the dedicated plugin package
+  is what Cloudflare's own current docs and fixture examples use, so that's
+  what's installed) running real Worker code inside actual `workerd`
+  against a local Miniflare-backed D1 — deliberately not hand-rolled
+  `env.DB` mocks, so a test failure means a real SQL/schema/logic mistake,
+  not a mock that quietly drifted from what production D1 actually does.
+  Tests call `exports.default.fetch(url, init)` (the real
+  `worker/index.js` fetch handler, matched-routes-and-all), not the
+  individual route functions directly — this exercises the exact
+  dispatch, auth, and status-code behavior a real request gets.
+- `worker/test/helpers.js`'s `seedUser()` inserts a real `users` +
+  `sessions` row directly via `env.DB` rather than going through
+  `/v1/auth/register`/`/v1/auth/login` — those two require a genuine
+  Cloudflare Turnstile round trip with no test bypass, which isn't
+  reproducible locally. This only exercises what session-gated routes
+  actually check (a valid, unexpired `sessions` row joined to `users`),
+  the same shape `getSessionUser()` reads in production; it does not
+  cover the register/login flow itself.
+- Real discovery made getting this working, unrelated to anything asked
+  for: replaying `worker/migrations/*.sql` in order against a genuinely
+  empty database fails at `0005_phase4_authorization.sql` with `no such
+  table: resources` — and the same happens for `site_settings`, `tools`,
+  and `changelog`. None of the four is ever `CREATE TABLE`d by any
+  tracked migration; they're referenced only via `ALTER TABLE`/`INSERT
+  ... SELECT`, meaning **the tracked migrations alone cannot rebuild the
+  real schema from scratch** — they assume a hand-created baseline from
+  before `wrangler d1 migrations` existed (0011's own comment confirms
+  this for `tools` specifically: "this table predates `wrangler d1
+  migrations` entirely"), and that baseline was never captured anywhere
+  in version control. Worked around for testing purposes only via
+  `worker/test/pre-migration-baseline.sql` — a reconstruction good enough
+  to satisfy what the tracked migrations and the routes under test
+  actually touch, explicitly commented as *not* a real migration and
+  *not* guaranteed to be byte-for-byte what production's real baseline
+  schema actually is. This is a real disaster-recovery gap independent of
+  testing (if the live D1 database were ever lost, `wrangler d1
+  migrations apply` alone would not reproduce it) — flagged to the user,
+  not fixed here; fixing it for real means dumping the actual production
+  schema for those four tables (`sqlite_master` via `wrangler d1
+  execute`) and adding it as a real numbered migration, not guessing at
+  it the way the test fixture does.
+- Run via `npm test` (`vitest run`).
 
 ## Roadmap
 
@@ -1187,6 +1265,71 @@ main domain is scoped against — see below.
   itself sets to the real client IP and strips from anything the client
   sent, same reason the Worker trusts it everywhere else instead of
   `x-forwarded-for`.
+- All Discord posting shares one webhook/channel now (2026-09-06) —
+  changelog, new-user signups, display-name changes, staff audit actions,
+  the daily security digest, and (new, same change) honeypot hits all
+  post through the single `env.DISCORD_WEBHOOK_URL` secret, requested
+  explicitly to replace the previous five separate per-feature webhooks
+  (`DISCORD_WEBHOOK_SECURITY_URL`, `DISCORD_WEBHOOK_NEW_USERS_URL`,
+  `DISCORD_WEBHOOK_NAME_CHANGES_URL`, `DISCORD_WEBHOOK_STAFF_LOGS_URL`,
+  plus the original `DISCORD_WEBHOOK_URL` for changelog) as easier to
+  manage. The four retired secrets were deleted outright from the live
+  Worker (`wrangler secret delete`), not just left unused — each embed
+  still sets its own distinct `footer.text` (`0xLLN changelog`/`new
+  users`/`name changes`/`staff-logs`/`security digest`/`honeypot`) so a
+  shared channel stays distinguishable message-by-message. See
+  `worker/lib/discord.js`'s own top comment for the live list of callers.
+  Honeypot hits (`logHoneypotHitV1`, `worker/routes/security.js`) newly
+  post live rather than only ever landing in the staff panel/daily
+  digest — but only the two cases the staff panel's own copy already
+  calls out as genuinely alarming: a POST (credentials submitted without
+  ever loading the page) or a matched real account (the probing IP/device
+  is also on file for a real login) — a routine anonymous GET is just a
+  scanner guessing a common path, and alerting on every one of those
+  would page staff for background noise the daily digest/panel already
+  cover.
+- `/account`'s standalone "Overview" page/nav item was removed (2026-09-06)
+  — its avatar/name/role greeting duplicated the Profile page (`/u/[id]`,
+  which already shows all three plus bio and achievements) verbatim, so
+  requested as clutter. Its two non-duplicated pieces — the
+  email-verification-resend banner and the "continue learning" shortcut —
+  moved into `/account/courses`, which is now the dashboard's de facto
+  landing page. `/account` itself stays a live route (a server-side
+  `redirect('/account/courses')` in `src/app/account/page.tsx`), not
+  deleted, since `login`/`register` and `Header.tsx`'s account link all
+  send users there; those three call sites were also pointed straight at
+  `/account/courses` to skip the extra hop. Max sidebar for a staff
+  member is now 6 items: Profile, Security, Courses, Contribute, Build,
+  Staff — Security stays (confirmed explicitly; almost got dropped
+  reflexively when a smaller target list was given verbally).
+- `/account/build` (instructor/staff-only course creation + list) folded
+  into `/account/contribute` (2026-09-06) as a `CourseBuildSection`,
+  rendered only for instructor/staff — same motivation as the Overview
+  fold-in above: two nav items that were both "what can this account
+  submit or manage," split only because one happened to be role-gated.
+  The course editor (`/account/build/[id]`) and group manager
+  (`/account/build/groups`) stayed their own routes, linked from within
+  that section — same reasoning that kept course review on its own route
+  during the earlier approvals fold-back. Sidebar for a staff member is
+  now 5 items: Profile, Security, Courses, Contribute, Staff.
+- Role/resource/course-request review folded back into `/account/staff` as
+  tabs (2026-09-06), reversing the earlier split into standalone
+  `/account/approvals/*` pages (see "Data and API direction" above). That
+  split was a deliberate content-depth decision — course review in
+  particular needed a real content-review page, not a modal — but it also
+  gave staff two separate top-level sidebar entries (`Staff` and
+  `Approvals`) for what is functionally one audience and one workflow.
+  Reducing that sidebar clutter is what drove the fold-back: `RoleRequestsPanel`/
+  `ResourceRequestsPanel`/`CourseRequestsPanel` now render as `AdminPanel.tsx`
+  tabs (`role-requests`/`resource-requests`/`course-requests`) instead of
+  their own routes, with the same per-tab pending-count badge the sidebar
+  used to show on `Approvals`. The one page that still needed its own
+  route — course content review, since a tab can't hold a full
+  modules→lessons→quiz review UI — moved to
+  `/account/staff/course-requests/[id]`; its "back to list"/breadcrumb
+  links now go to `/account/staff?tab=course-requests` so returning from a
+  review lands back on that tab instead of resetting to Users.
+  `/account/approvals/*` no longer exists.
 
 ### Learning and motivation model
 

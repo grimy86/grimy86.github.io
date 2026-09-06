@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import AuthTextField from '@/components/auth/AuthTextField'
 import AuthTextArea from '@/components/auth/AuthTextArea'
@@ -17,7 +18,11 @@ import {
   submitRoleRequest,
   getMyResourceRequests,
   submitResourceRequest,
+  getMyCourses,
+  createCourse,
+  deleteCourse,
   unwrapResult,
+  type InstructorCourse,
 } from '@/lib/authClient'
 
 const RESOURCE_TYPES = [
@@ -26,6 +31,25 @@ const RESOURCE_TYPES = [
   { value: 'videos', label: 'Videos' },
   { value: 'git', label: 'Git repository' },
 ]
+
+// Same style constants as AdminPanel.tsx/build's old page — duplicated
+// rather than shared, matching this app's existing low-abstraction
+// convention (each admin/instructor section owns its own small set of
+// these rather than importing a shared style module for three classes).
+const inputClass = "border border-white/15 bg-[#17181B] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
+const buttonClass = "border border-[#FF7A33]/50 px-3 py-1.5 text-xs font-medium text-[#FF7A33] transition-colors transition-transform duration-150 hover:border-[#FF7A33] hover:bg-[#FF7A33]/10 active:scale-[0.98] motion-reduce:transition-none disabled:opacity-50 disabled:active:scale-100"
+
+const COURSE_STATUS_LABEL: Record<InstructorCourse['status'], string> = {
+  draft: 'Draft',
+  pending_review: 'In review',
+  published: 'Published',
+}
+
+const COURSE_STATUS_CLASS: Record<InstructorCourse['status'], string> = {
+  draft: 'text-white/40',
+  pending_review: 'text-[#FF7A33]',
+  published: 'text-[#3FB950]',
+}
 
 // Shared eyebrow/heading/subtext block — every branch below (loading,
 // pending, done, the two real forms) renders one of these instead of a
@@ -41,6 +65,14 @@ function ContributeHeader({ heading, subtext }: { heading: string; subtext?: str
   )
 }
 
+// Also absorbs the former standalone /account/build landing page (course
+// creation + list) — that page and this one were both "what can this
+// account submit or manage" content gated by role, just split across two
+// nav items for what's really one workflow. An instructor/staff account
+// now sees both sections stacked on one page instead of switching tabs;
+// the course editor (/account/build/[id]) and group management
+// (/account/build/groups) stay their own routes since a full
+// modules/lessons/quiz editor and a roster manager don't fit inline here.
 export default function ContributePage() {
   const router = useRouter()
   const { user, loading: sessionLoading } = useSession()
@@ -60,9 +92,18 @@ export default function ContributePage() {
     )
   }
 
-  return user.role === 'student'
-    ? <RoleRequestPanel />
-    : <ResourceRequestPanel />
+  if (user.role === 'student') {
+    return <RoleRequestPanel />
+  }
+
+  const canBuild = user.role === 'instructor' || user.role === 'staff'
+
+  return (
+    <div>
+      <ResourceRequestPanel />
+      {canBuild && <CourseBuildSection />}
+    </div>
+  )
 }
 
 function RoleRequestPanel() {
@@ -269,6 +310,110 @@ function ResourceRequestPanel() {
               <p className="mt-1 text-xs text-[#90939A]">{r.rejectionReason}</p>
             )}
           </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Formerly the whole of /account/build — course creation and the course
+// list, now a stacked section below ResourceRequestPanel instead of its
+// own page. mt-16 + a top border reads as a new section rather than a
+// continuation of the resource-request form above it, same way "Your
+// submissions" above separates from its own form with a plain Eyebrow.
+function CourseBuildSection() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const { data: courses } = useQuery({ queryKey: ['myCourses'], queryFn: () => unwrapResult(getMyCourses()) })
+
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState('')
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+
+  const createMutation = useMutation({
+    mutationFn: () => unwrapResult(createCourse({ title, description: description || undefined, category: category || undefined })),
+    onSuccess: () => {
+      setTitle('')
+      setDescription('')
+      setCategory('')
+      queryClient.invalidateQueries({ queryKey: ['myCourses'] })
+      toast.success('Course created.')
+    },
+    onError: (error) => toast.error(error.message),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => unwrapResult(deleteCourse(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['myCourses'] })
+      toast.success('Course deleted.')
+    },
+    onError: (error) => toast.error(error.message),
+    onSettled: () => setDeletingId(null),
+  })
+
+  function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    createMutation.mutate()
+  }
+
+  // Drafts only, matching the Worker's own restriction — once a course is
+  // submitted for review or published it has real reviewer/student
+  // investment, so removing it becomes a staff-only action instead of
+  // instructor self-service.
+  function handleDelete(e: React.MouseEvent, id: number, title: string) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!window.confirm(`Delete "${title}"? This can't be undone.`)) return
+    setDeletingId(id)
+    deleteMutation.mutate(id)
+  }
+
+  return (
+    <div className="mt-16 border-t border-white/10 pt-10">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Eyebrow as="h2">Manage courses</Eyebrow>
+        <Link href="/account/build/groups" className="text-sm text-white/70 underline underline-offset-2 transition-colors hover:text-white">
+          Manage student groups
+        </Link>
+      </div>
+
+      <form onSubmit={handleCreate} className="mt-6 flex flex-wrap items-end gap-3">
+        <input type="text" required placeholder="Course title" value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+        <input type="text" placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className={inputClass} />
+        <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className={inputClass} />
+        <button type="submit" disabled={createMutation.isPending} className={buttonClass}>{createMutation.isPending ? '…' : 'New course'}</button>
+      </form>
+      <div className="mt-6 border-l border-t border-white/10">
+        {courses === undefined && <SkeletonRow count={3} />}
+        {courses?.length === 0 && <p className="border-b border-r border-white/10 bg-[#17181B] p-4 text-sm text-[#90939A]">No courses yet — create one above.</p>}
+        {courses?.map((c) => (
+          <Link
+            key={c.id}
+            href={`/account/build/${c.id}`}
+            className="block border-b border-r border-white/10 bg-[#17181B] p-4 transition-colors hover:bg-[#0B0B0D]"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-medium text-white">{c.title}</span>
+              <span className="flex items-center gap-3">
+                <span className={`text-xs uppercase tracking-[0.1em] ${COURSE_STATUS_CLASS[c.status]}`}>{COURSE_STATUS_LABEL[c.status]}</span>
+                {c.status === 'draft' && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(e, c.id, c.title)}
+                    disabled={deletingId === c.id}
+                    className="text-xs text-white/40 underline underline-offset-2 transition-colors hover:text-[#F85149] disabled:opacity-50"
+                  >
+                    {deletingId === c.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+              </span>
+            </div>
+            {c.description && <p className="mt-2 text-sm text-[#90939A]">{c.description}</p>}
+            {c.status === 'draft' && c.rejectionReason && (
+              <p className="mt-2 text-xs text-[#F85149]">Rejected: {c.rejectionReason}</p>
+            )}
+          </Link>
         ))}
       </div>
     </div>
