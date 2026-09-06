@@ -2,10 +2,11 @@
 // site's dependency-free baseline (see AGENTS.md's Motion section for
 // the same reasoning applied to animation). Paths are the official,
 // unmodified marks: Discord and GitHub from Simple Icons (CC0); the
-// license/scale glyph plus the library's resource-type marks (file,
-// globe, play, git-branch, tools) from GitHub's own Primer Octicons
-// (MIT) — fetched directly from each project's published package rather
-// than redrawn from memory, so the shapes are exact.
+// license/scale glyph, the library's resource-type marks (file, globe,
+// play, git-branch, tools), the achievement icons, and the
+// notification bell all from GitHub's own Primer Octicons (MIT) —
+// fetched directly from each project's published package rather than
+// redrawn from memory, so the shapes are exact.
 
 import type { CSSProperties } from 'react'
 
@@ -152,6 +153,14 @@ export function BookIcon({ className, style }: IconProps) {
   return (
     <svg viewBox="0 0 16 16" fill="currentColor" className={className} style={style} aria-hidden="true">
       <path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z" />
+    </svg>
+  )
+}
+
+export function BellIcon({ className, style }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className} style={style} aria-hidden="true">
+      <path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Zm5-3.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.017.017 0 0 0-.003.01l.001.006c0 .002.002.004.004.006l.006.004.007.001h10.964l.007-.001.006-.004.004-.006.001-.007a.017.017 0 0 0-.003-.01l-1.703-2.554a1.745 1.745 0 0 1-.294-.97V5A3.5 3.5 0 0 0 8 1.5Z" />
     </svg>
   )
 }

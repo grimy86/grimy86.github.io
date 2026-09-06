@@ -325,10 +325,26 @@ function CourseAnalyticsPanel({ courseId }: { courseId: number }) {
                   />
                 </div>
                 {lesson.quiz && (
-                  <p className="mt-2 text-xs text-[#90939A]">
-                    {lesson.quiz.attemptCount} quiz attempt{lesson.quiz.attemptCount === 1 ? '' : 's'}
-                    {lesson.quiz.averageScorePercent !== null && ` · avg. score ${lesson.quiz.averageScorePercent}%`}
-                  </p>
+                  <div className="mt-2">
+                    <p className="text-xs text-[#90939A]">
+                      {lesson.quiz.attemptCount} quiz attempt{lesson.quiz.attemptCount === 1 ? '' : 's'}
+                      {lesson.quiz.averageScorePercent !== null && ` · avg. score ${lesson.quiz.averageScorePercent}%`}
+                    </p>
+                    {lesson.quiz.perQuestion.length > 0 && (
+                      <ul className="mt-2 flex flex-col gap-1.5 border-l border-white/10 pl-3">
+                        {lesson.quiz.perQuestion.map((q) => (
+                          <li key={q.prompt} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="truncate text-white/60">{q.prompt}</span>
+                            <span
+                              className={`shrink-0 ${q.correctRatePercent < 50 ? 'text-[#F85149]' : 'text-white/40'}`}
+                            >
+                              {q.correctRatePercent}% correct ({q.attemptCount})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </div>
             ))}

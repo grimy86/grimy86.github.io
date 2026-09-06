@@ -52,9 +52,20 @@ export default function AchievementTile({ achievement }: { achievement: UserAchi
             <Icon className="h-4 w-4" />
           </span>
         )}
-        <div>
+        <div className="min-w-0">
           <p className={`text-sm font-semibold ${achievement.unlocked ? 'text-white' : 'text-[#90939A]'}`}>{achievement.title}</p>
           <p className={`mt-1 text-xs ${achievement.unlocked ? 'text-[#90939A]' : 'text-[#90939A]/60'}`}>{achievement.description}</p>
+          {achievement.progress && (
+            <div className="mt-2">
+              <div className="h-1 w-full bg-white/10">
+                <div
+                  className="h-full bg-[#FF7A33]/60"
+                  style={{ width: `${Math.round((achievement.progress.current / achievement.progress.target) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-[#90939A]/70">{achievement.progress.current}/{achievement.progress.target}</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

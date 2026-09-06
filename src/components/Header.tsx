@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from './SessionProvider'
 import { getAssetSrc } from '@/lib/authClient'
+import NotificationBell from './NotificationBell'
 
 const links = [
   { href: '/', label: 'home' },
@@ -49,7 +50,8 @@ export default function Header() {
           </div>
 
           {!loading && (
-            <div className="ml-5 shrink-0 border-l border-white/10 pl-5">
+            <div className="ml-5 flex shrink-0 items-center gap-4 border-l border-white/10 pl-5">
+              {user && <NotificationBell />}
               {user ? (
                 <Link
                   href="/account/courses"

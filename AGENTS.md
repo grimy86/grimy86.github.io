@@ -72,7 +72,12 @@ was 0.0.1 and experimental at the time — their auth/validation-only paths
 that return before ever calling out are still easy to add later without
 that dependency), and the AdminPanel tab-count question from the same
 conversation (deliberately held off pending real usage data, not a
-testing gap).
+testing gap). **Covered for real 2026-09-06** — see
+`worker/test/ip-blocking.test.js` below; `@msw/cloudflare` was still
+0.0.1 when re-checked, but plain vitest `vi.stubGlobal("fetch", ...)`
+turned out to work fine inside this workerd test environment with no
+special library at all, so the full proxying behavior got tested too,
+not just the auth-only paths originally planned.
 
 - Runner: `@cloudflare/vitest-plugin` (the current package — the
   similarly-named older `@cloudflare/vitest-pool-workers` also still
@@ -96,27 +101,18 @@ testing gap).
   cover the register/login flow itself.
 - Real discovery made getting this working, unrelated to anything asked
   for: replaying `worker/migrations/*.sql` in order against a genuinely
-  empty database fails at `0005_phase4_authorization.sql` with `no such
-  table: resources` — and the same happens for `site_settings`, `tools`,
-  and `changelog`. None of the four is ever `CREATE TABLE`d by any
-  tracked migration; they're referenced only via `ALTER TABLE`/`INSERT
-  ... SELECT`, meaning **the tracked migrations alone cannot rebuild the
-  real schema from scratch** — they assume a hand-created baseline from
-  before `wrangler d1 migrations` existed (0011's own comment confirms
-  this for `tools` specifically: "this table predates `wrangler d1
-  migrations` entirely"), and that baseline was never captured anywhere
-  in version control. Worked around for testing purposes only via
-  `worker/test/pre-migration-baseline.sql` — a reconstruction good enough
-  to satisfy what the tracked migrations and the routes under test
-  actually touch, explicitly commented as *not* a real migration and
-  *not* guaranteed to be byte-for-byte what production's real baseline
-  schema actually is. This is a real disaster-recovery gap independent of
-  testing (if the live D1 database were ever lost, `wrangler d1
-  migrations apply` alone would not reproduce it) — flagged to the user,
-  not fixed here; fixing it for real means dumping the actual production
-  schema for those four tables (`sqlite_master` via `wrangler d1
-  execute`) and adding it as a real numbered migration, not guessing at
-  it the way the test fixture does.
+  empty database used to fail at `0005_phase4_authorization.sql` with
+  `no such table: resources` — and the same happened for
+  `site_settings`, `tools`, and `changelog`. None of the four was ever
+  `CREATE TABLE`d by any tracked migration; they were referenced only via
+  `ALTER TABLE`/`INSERT ... SELECT`, meaning the tracked migrations alone
+  could not rebuild the real schema from scratch — they assumed a
+  hand-created baseline from before `wrangler d1 migrations` existed
+  (0011's own comment confirms this for `tools` specifically: "this table
+  predates `wrangler d1 migrations` entirely"), and that baseline was
+  never captured anywhere in version control. Same root cause as, and
+  fixed together with, the `courses.icon_glyph` gap below —
+  **fixed for real 2026-09-06**, see that entry.
 - Run via `npm test` (`vitest run`).
 
 ## Roadmap
@@ -369,6 +365,15 @@ These are planning notes, not authorization to begin future phases early.
     same recreate-the-table pattern as 0004/0006) since grading is
     server-side against a small answer set; unbounded attempts would let
     someone brute-force correct answers by repeated submission.
+  - Covered by `worker/test/enrollment-progress.test.js` (2026-09-06,
+    11 tests): the re-enroll-preserves-progress upsert, the
+    lesson→module→course completion cascade (course-level XP awarded
+    exactly once, module-level XP once per module, not just the last
+    one), `lesson_complete`/`quiz_complete` XP idempotency on repeat
+    completion, the enrolled/not-enrolled and quiz/plain-complete
+    boundary checks above, and that `quiz_attempts` inserts one row per
+    attempt (not an upsert) with `/v1/me/statistics`'s average computed
+    across every attempt, not best-of.
 - **Phase 7 (learning system UI), concrete decisions so far** — scoping
   and Slice 1 (catalog + content pipeline) done; see WORKLOG's "Phase 7
   scoping" and "Course content moves to R2 + auth gate" entries for the
@@ -767,6 +772,58 @@ These are planning notes, not authorization to begin future phases early.
     lesson — completing an *already-backdated* lesson resets its own
     `completed_at` to now, a real gotcha hit during this verification),
     then deleted the QA account (cascades).
+  - **Achievement progress added 2026-09-06** — locked achievements now
+    carry a `progress: { current, target }` field for the three
+    "reach N of something" criteria types (`lessons_completed_n`,
+    `streak_days`, `resources_opened_n`); the four one-shot booleans
+    (`first_lesson_complete` etc.) never do, since "0/1" isn't a useful
+    bar. `computeAchievementStatsV1` factors out the stats math that used
+    to live only inline in `evaluateAchievementsV1`, now shared by both
+    the unlock check and the progress numbers. **Owner-only, not shown
+    to third-party viewers or staff** — asked the user first rather than
+    assuming, since this reverses the usual "staff always sees real
+    data" default: progress is a personal motivator about the account's
+    own activity level, not moderation-relevant identity data, so staff
+    doesn't get an exception here the way it does for `anonymous_mode`
+    elsewhere. Covered by `worker/test/achievement-progress.test.js`
+    (6 tests).
+  - **In-app notifications added 2026-09-06**, prompted by a "what
+    frontend ideas would help" discussion — user confirmed in-app-only
+    (no email, same "don't spam" call already made for streak reminders)
+    and a small fixed v1 event list: achievement unlocked, your own
+    course approved/rejected, added as a course co-author. Deliberately
+    not its own stored/queued table — every event already lives in the
+    table that caused it; "unread" is one new timestamp,
+    `users.notifications_seen_at`, compared against each event's own
+    timestamp, not a read/unread row per notification. New
+    `courses.reviewed_at` (migration `0036_notifications.sql`) exists
+    specifically because `updated_at` gets bumped by any later unrelated
+    edit to a published course too — using it for "when was this
+    approved" would make an old approval look freshly-approved again
+    after any future tweak. Real SQLite limitation hit while writing
+    0036: `ALTER TABLE ... ADD COLUMN ... DEFAULT (strftime(...))`
+    errors outright ("Cannot add a column with non-constant default") —
+    worked around with a plain `UPDATE` backfill in the same migration
+    instead, so existing users' history counts as already-seen rather
+    than surfacing as a pile of "new" notifications the moment this
+    ships. Approval/rejection notifications are scoped to `created_by`
+    only, not every co-author — a real v1 simplification. `NotificationBell`
+    (`src/components/Header.tsx`) polls every 60s while logged in, same
+    pattern as `AccountShell`'s existing staff pending-count poll.
+    Covered by `worker/test/notifications.test.js` (7 tests, including
+    that the approval event ties to the real `reviewed_at` rather than
+    `updated_at`, and that adding a co-author doesn't notify the person
+    who did the adding).
+  - Same conversation also flagged, then corrected, a claimed empty-state
+    gap: the achievements grid on a profile looked like it might render
+    blank with nothing unlocked, but `getAchievementsForUserV1` always
+    returns every achievement (locked and unlocked) as its own tile, so
+    it's never actually empty — caught before adding a redundant "no
+    achievements yet" message above a grid that already says exactly
+    that. Also audited whether an empty `display_name` is possible after
+    any flow (a user question, not a known bug) — confirmed not possible
+    both by code (every write path rejects under 1 character) and by
+    live production data (zero empty names).
 - **Course metadata, multi-author, and group-restricted visibility,
   concrete decisions** — migration `0017_course_groups_metadata.sql`:
   `courses` gains `icon_path`, `difficulty` (nullable enum), `visibility`
@@ -791,6 +848,23 @@ These are planning notes, not authorization to begin future phases early.
     so a plain student added as "co-author" would be listed but unable to
     use any of the rights it's supposed to grant; caught during this
     session's own verification, not by the user.
+  - Covered by `worker/test/course-authoring.test.js` (2026-09-06,
+    18 tests): the `isCourseAuthorV1` (co-author can edit) vs.
+    `courseOwnedBy` (co-author cannot delete the course or manage other
+    authors) split above, that staff bypasses both on a course they
+    don't own, the `draft`-only delete guard, quiz's
+    exactly-one-correct-answer validation, that updating a quiz's
+    questions replaces rather than appends them, that a lesson's `type`
+    is immutable and the update endpoint ignores the request body's
+    `type` field, the three `submitCourseForReviewV1` guards
+    (zero-lesson / already-pending / already-published), that the two
+    `addCourseAuthorV1` rejection paths (unregistered email vs. a real
+    non-instructor email) return an identical error so the endpoint
+    can't be used to probe who's registered, and that the delete
+    cascades (`ON DELETE CASCADE` on modules→lessons→exercises/
+    questions→answers) actually fire in the D1/workerd test binding —
+    nothing in this codebase sets `PRAGMA foreign_keys` itself, so this
+    confirms the binding defaults it on rather than assuming so.
   - **Groups are instructor-managed rosters, not self-service** — an
     instructor (or admin) adds a student by email directly
     (`POST .../groups/:id/members`), no invite code/join flow, confirmed
@@ -800,6 +874,20 @@ These are planning notes, not authorization to begin future phases early.
     restricted course is open to) only accepts groups the caller actually
     owns (or, for an admin, any group) — otherwise an instructor could
     restrict their course to a group they don't control.
+  - Covered by `worker/test/groups.test.js` (2026-09-06, 9 tests): the
+    `groupOwnedBy` boundary (non-owner 403 on update/view-members/delete,
+    staff bypass), membership add/remove and the delete cascade to
+    `group_members`, `setCourseGroupsV1` rejecting a group the caller
+    doesn't own, and — the actual payoff — the full end-to-end chain:
+    adding a student to a group, granting that group access to a
+    restricted course, and confirming the member can enroll while a
+    non-member still 404s, then confirming access is revoked once the
+    student is removed from the group. Also confirmed
+    `addGroupMemberV1`'s unregistered-email case returns 404 rather than
+    the same-error-either-way shape `addCourseAuthorV1` uses — a real,
+    deliberate difference (adding a specific known student by email is
+    the point here, not something to obscure), not an inconsistency to
+    fix.
   - **A restricted course is fully invisible to non-members, not just
     locked** — confirmed with the user over a "visible but can't enroll"
     UX. `getCoursesV1`, `getCourseV1`, `getCourseLessonsV1`, `getLessonV1`,
@@ -1143,7 +1231,16 @@ These are planning notes, not authorization to begin future phases early.
     folded straight into that Cloudflare rule's own `notes` field
     (`"Blocked via admin panel — associated with user #42 (email)"`)
     rather than a separate table, so it's visible in the Cloudflare
-    dashboard too, not just this admin panel.
+    dashboard too, not just this admin panel. Covered by
+    `worker/test/ip-blocking.test.js` (2026-09-06, 10 tests, `fetch`
+    stubbed rather than actually reaching Cloudflare): the auth/
+    validation paths that return before any outbound call, the rule-shape
+    mapping and 502-on-Cloudflare-failure handling for list/create/
+    delete, the notes-folding above (checked against the actual outbound
+    request body, not just the Worker's response), and that unblocking
+    looks up the real IP first so the audit log records what was
+    unblocked rather than just Cloudflare's opaque rule id (falling back
+    to the id if that lookup itself fails).
   - `/v1/staff/*`, not `/v1/admin/*`, **and** the frontend page was put at
     `/staff`, not `/admin` — WAF Rule 2 blocks any path
     `contains "/admin"`. The API prefix was caught while planning this;
@@ -1304,11 +1401,34 @@ main domain is scoped against — see below.
   `worker/lib/courseAccess.js`), not a `LEFT JOIN` against
   `lesson_progress`/`quiz_attempts` — joining both against the same
   lesson row would fan out into a cartesian product and silently inflate
-  every count. Deliberately doesn't break a quiz down per-question:
-  `quiz_attempts` only ever stored the final score/total, never which
-  answer was chosen per question (see `attemptQuizV1`), so "which
-  question do people get wrong most" isn't answerable without a schema
-  change — noted as a real follow-up, not attempted here. Frontend: a new
+  every count. **Per-question breakdown added 2026-09-06** (was deferred
+  at first, `quiz_attempts` only ever stored the final score/total, not
+  which answer was chosen per question) — new migration
+  `0035_quiz_question_attempts.sql` and `quiz.perQuestion` on each quiz
+  lesson in this response. Deliberately a snapshot (`question_prompt`/
+  `chosen_answer_body` text copied at attempt time), not a foreign key to
+  `questions`/`answers`: `updateLessonV1` -> `writeLessonTypeRows`
+  deletes and recreates every question/answer row on *every* quiz save,
+  even a one-word wording fix — an FK would silently zero out a quiz's
+  accumulated stats on its next edit, with no warning that happened.
+  Grouped by `(lesson_id, question_prompt)`, so reworking a question's
+  text shows the old and new wording as two separate entries rather than
+  merging them — confirmed with the user as correct behavior, not a
+  limitation to fix, since they genuinely answered different text.
+  Asked the user to choose between this and a live-FK version before
+  writing any code, since it reverses the reasoning `writeLessonTypeRows`
+  itself gives for being safe ("simpler than diffing... safe because
+  quiz_attempts never [had] a per-question/per-answer FK") — user asked
+  for the actual D1 storage-cost picture first (checked `wrangler d1
+  info`: 696 KB of the 5 GB free tier, ~1,600/6,082 writes/reads of the
+  daily caps — this feature is pure D1, no R2 involved, and either
+  design costs a rounding error at this scale), then picked the
+  snapshot. Covered by two new tests in `worker/test/course-analytics.test.js`:
+  aggregation across multiple students' *real* attempts (via
+  `POST /v1/lessons/:id/attempt`, not a raw insert), and — the actual
+  trade-off, proven rather than assumed — editing a quiz mid-test and
+  confirming the pre- and post-edit attempts both survive as separate
+  entries instead of colliding or disappearing. Frontend: a new
   "Analytics" toggle in the course builder header
   (`src/app/account/build/[id]/page.tsx`) swaps the right pane to
   `CourseAnalyticsPanel`, sibling to the existing "Course settings"
@@ -1453,9 +1573,32 @@ main domain is scoped against — see below.
   profile. Second untracked-schema gap found this same day, different
   shape from the first: `courses.icon_glyph` is read throughout the
   codebase but no tracked migration ever adds it — confirmed against the
-  real production schema, patched in `worker/test/setup.js`, not fixed
-  for real. See WORKLOG's "Opt-in anonymous mode" entry for the full
-  design and the three scoping questions asked before writing any code.
+  real production schema, patched in `worker/test/setup.js` at the time,
+  not fixed for real yet. See WORKLOG's "Opt-in anonymous mode" entry for
+  the full design and the three scoping questions asked before writing
+  any code. **Fixed for real 2026-09-06** (same day, later) together with
+  the four-table gap above: `worker/migrations/0000_pre_migration_baseline_tables.sql`
+  (numbered 0000, not appended at the end, so it actually runs before
+  0005 on a fresh database — `wrangler d1 migrations apply` applies
+  whatever isn't yet in its own bookkeeping table in filename order,
+  regardless of when the file was added) recreates `resources`,
+  `site_settings`, `tools`, and `changelog`'s real production shapes
+  (dumped via `sqlite_master`, not guessed) using `CREATE TABLE IF NOT
+  EXISTS` so it's a safe no-op if it ever actually ran against
+  production; `worker/migrations/0034_courses_icon_glyph.sql` adds the
+  column. Production already has both end-states (built by hand, long
+  before migration tracking existed) — actually re-running either
+  migration's DDL there would either error (`icon_glyph` already exists)
+  or resurrect an empty `tools` table 0011 already dropped — so instead
+  of running them, both filenames were inserted directly into
+  production's own `d1_migrations` bookkeeping table to mark them
+  applied without executing their SQL (asked the user first, a direct
+  write against a shared production system). `wrangler d1 migrations
+  list lowlevelnotes-db --remote` confirms production sees all 35
+  migrations as applied. `npx vitest run` now replays 0000→0034 from a
+  genuinely empty database with no separate workaround — deleted the old
+  `worker/test/pre-migration-baseline.sql` fixture and the manual
+  `icon_glyph` patch from `worker/test/setup.js`, both superseded.
   Same-day follow-up: `listUsersStaffV1` now shows every user's
   `anonymousHandle` on the staff Users tab (not just currently-anonymized
   ones, since it's deterministic from the id — lets staff look one up

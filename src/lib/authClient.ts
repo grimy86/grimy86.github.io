@@ -392,6 +392,11 @@ export type UserAchievement = {
   description: string
   unlocked: boolean
   unlockedAt: string | null
+  // Present only for a still-locked achievement with a numeric target,
+  // and only when the viewer is the profile's own owner — the backend
+  // omits it entirely for third-party viewers and staff, so its absence
+  // here isn't something this type needs to model further.
+  progress?: { current: number; target: number }
 }
 
 export type UserProfile = {
@@ -432,6 +437,25 @@ export function setAnonymizeCourseAuthorship(enabled: boolean) {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
   })
+}
+
+export type Notification =
+  | { type: 'achievement_unlocked'; at: string; title: string; slug: string }
+  | { type: 'course_approved'; at: string; courseId: number; courseTitle: string }
+  | { type: 'course_rejected'; at: string; courseId: number; courseTitle: string; reason: string | null }
+  | { type: 'added_as_coauthor'; at: string; courseId: number; courseTitle: string }
+
+export type MyNotifications = {
+  unseenCount: number
+  notifications: Notification[]
+}
+
+export function getMyNotifications() {
+  return authFetch<MyNotifications>('/v1/me/notifications')
+}
+
+export function markNotificationsSeen() {
+  return authFetch<{ message: string }>('/v1/me/notifications/seen', { method: 'POST' })
 }
 
 export function updateMyProfile(displayName: string, bio: string) {
@@ -851,7 +875,11 @@ export type CourseAnalyticsLesson = {
   moduleTitle: string
   completedCount: number
   completionRatePercent: number | null
-  quiz: { attemptCount: number; averageScorePercent: number | null } | null
+  quiz: {
+    attemptCount: number
+    averageScorePercent: number | null
+    perQuestion: { prompt: string; attemptCount: number; correctCount: number; correctRatePercent: number }[]
+  } | null
 }
 
 export type CourseAnalytics = {
