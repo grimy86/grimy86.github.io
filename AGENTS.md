@@ -1456,6 +1456,11 @@ main domain is scoped against — see below.
   real production schema, patched in `worker/test/setup.js`, not fixed
   for real. See WORKLOG's "Opt-in anonymous mode" entry for the full
   design and the three scoping questions asked before writing any code.
+  Same-day follow-up: `listUsersStaffV1` now shows every user's
+  `anonymousHandle` on the staff Users tab (not just currently-anonymized
+  ones, since it's deterministic from the id — lets staff look one up
+  even after the account toggles anonymity back off), plus the two raw
+  boolean flags so it's clear whether it's actually active right now.
 - Per-page metadata + a real `robots.ts`, first pass (2026-09-06) —
   prompted by discovering (grepped, not assumed) that literally every
   page except the root layout and the `/admin` decoy shared one generic

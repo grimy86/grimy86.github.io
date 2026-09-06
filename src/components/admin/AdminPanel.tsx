@@ -313,6 +313,23 @@ function UsersSection() {
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm font-medium text-white">{u.displayName}</span>
               <span className="text-xs text-[#90939A]">{u.email}</span>
+              <span
+                className="font-mono text-xs text-white/30"
+                title="This account's anonymous handle — shown even when not currently in use, since it's deterministic from the account id (e.g. to look up a handle spotted on the leaderboard)"
+              >
+                {u.anonymousHandle}
+              </span>
+              {(u.anonymousMode || u.anonymizeCourseAuthorship) && (
+                <span
+                  className="text-xs uppercase tracking-[0.1em] text-[#58A6FF]"
+                  title={[
+                    u.anonymousMode && 'Profile/leaderboard anonymized',
+                    u.anonymizeCourseAuthorship && 'Course authorship anonymized',
+                  ].filter(Boolean).join(' · ')}
+                >
+                  👻 Anonymous
+                </span>
+              )}
               {u.isSuperAdmin && <span className="text-xs uppercase tracking-[0.1em] text-[#FF7A33]">Super admin</span>}
               {u.bannedAt && <span className="text-xs uppercase tracking-[0.1em] text-[#F85149]">Banned{u.banReason ? `: ${u.banReason}` : ''}</span>}
               {!u.emailVerified && <span className="text-xs uppercase tracking-[0.1em] text-white/40">Unverified</span>}

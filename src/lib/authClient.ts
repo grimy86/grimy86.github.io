@@ -543,6 +543,14 @@ export type StaffUser = {
   isSuperAdmin: boolean
   createdAt: string
   securityEventCount: number
+  // Shown for every user, not just ones currently anonymized — it's
+  // deterministic from the id, so staff can look one up (e.g. a handle
+  // spotted on the leaderboard) even if the account has since toggled
+  // anonymity back off. anonymousMode/anonymizeCourseAuthorship are what
+  // say whether it's actually in use right now.
+  anonymousHandle: string
+  anonymousMode: boolean
+  anonymizeCourseAuthorship: boolean
 }
 
 export type BlockedIp = {

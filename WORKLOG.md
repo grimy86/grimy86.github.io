@@ -4616,3 +4616,26 @@ Worker deployed, `/health` confirmed OK. No live account session was
 available to verify further end-to-end (the earlier test account's
 session had already expired) — covered by the test suite instead, same
 situation as the streak-reminder feature earlier the same day.
+
+## Anonymous handle visible on the staff Users tab (2026-09-06)
+
+Immediate follow-up, same day: staff had no way to correlate a handle
+spotted on the leaderboard or a profile back to a real account.
+`listUsersStaffV1` (`worker/routes/staff.js`) now selects
+`anonymous_mode`/`anonymize_course_authorship` and includes every user's
+`anonymousHandle` (`getAnonymousHandle`, same helper as everywhere else)
+— shown for *every* account, not just ones currently anonymized, since
+the handle is deterministic from the id and staff might need to look one
+up even after the account toggled anonymity back off; the two boolean
+flags are what say whether it's actually in use right now.
+`mapUserStaff` (`worker/lib/mappers.js`) stayed a pure sync mapper for
+the two booleans (simple `Boolean()` conversions); the handle itself is
+filled in as a second `Promise.all` pass in the route handler, same
+split `mapCourse`/course-authorship anonymization already established
+(mappers don't get access to `env.ANON_HASH_SECRET`). Frontend: the
+handle shows as a small monospace tag next to the email on every user
+row in `AdminPanel.tsx`'s Users tab, with a 👻 "Anonymous" badge (hover
+for which of the two toggles is on) only when at least one is currently
+active. One new test confirming both the always-present handle and the
+accurate flags. 55/55 across the whole suite, Worker deployed,
+`/health` confirmed OK.
